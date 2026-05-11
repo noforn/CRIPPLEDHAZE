@@ -9,7 +9,7 @@ Establish a user-mode control channel to the CYBELSOFT DriversCloud kernel drive
 DriversCloud (by CybelSoft, formerly associated with Ma-Config.com) is a legitimate Windows system information and driver detection/update tool. 
 Its desktop agent (DriversCloudAgent.exe) performs deep hardware/software scans (including BSOD analysis and hardware health monitoring).
 
-[DriversCloud] (https://www.driverscloud.com/en)
+[DriversCloud]: (https://www.driverscloud.com/en)
 
 Once loaded, ***DriversCloud_amd64.sys***, the WHQL-signed driver intended only to enable DriverCloudAgent.exe's low-level hardware queries and driver management functions, creates a device object with a null security descriptor. The driver implements zero access control, authentication, or authorization checks on any of its seven IOCTL interfaces.
 
