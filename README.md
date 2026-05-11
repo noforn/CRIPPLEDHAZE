@@ -1,6 +1,6 @@
 # CRIPPLEDHAZE
 
-**Arbitrary Windows kernel read/write from user-mode via WHQL-signed driver**
+**Arbitrary Windows kernel read/write from user-mode via WHQL-signed driver.**
 
 ### OBJECTIVE(s):
 Establish a user-mode control channel to the CYBELSOFT DriversCloud kernel driver surface and leverage its exposed IOCTL capabilities to develop a stable, reliable kernel read/write primitive for operation against arbitrary virtual addresses.
