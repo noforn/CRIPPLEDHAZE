@@ -20,12 +20,13 @@ use crate::commands::misc::{
     cmd_token,
 };
 use crate::commands::borrow::cmd_inject;
+use crate::commands::dse::cmd_dse;
 use crate::commands::r#priv::{cmd_priv, cmd_privn};
 use crate::device::{msr_read, msr_write, phys_read_result, Device, DEVICE_PATH, MSR_LSTAR};
 use crate::utils::{find_mod, get_kernel_modules, hexdump, parse_hex_or_dec};
 
 #[derive(Parser)]
-#[command(name = "DriversCloud", about = "DriversCloud driver client")]
+#[command(name = "DriversCloud", about = "Hardware Detection Service")]
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
@@ -33,7 +34,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    #[command(name = "r-mem")]
+    #[command(name = "rmem")]
     RMem {
         addr: String,
         len: String,
@@ -104,6 +105,12 @@ enum Cmd {
     #[command(name = "inject")]
     Inject {
         pid: Option<String>,
+    },
+
+    #[command(name = "dse")]
+    Dse {
+        action: Option<String>,
+        value: Option<String>,
     },
 }
 
@@ -207,6 +214,15 @@ fn main() -> Result<()> {
                 None    => None,
             };
             cmd_inject(&dev, target_pid)?;
+        }
+
+        Cmd::Dse { action, value } => {
+            let act = action.as_deref().unwrap_or("status");
+            let set_val = match value {
+                Some(s) => Some(parse_hex_or_dec(&s)? as u32),
+                None    => None,
+            };
+            cmd_dse(&dev, act, set_val)?;
         }
     }
 
