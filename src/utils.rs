@@ -148,27 +148,35 @@ pub fn resolve_base_fallback(dev: &Device, lstar_va: u64) -> Option<u64> {
     let mut addr = 0x1000u64;
     let mut buf = Vec::with_capacity(crate::device::PHYS_BUF_SIZE);
     unsafe { buf.set_len(crate::device::PHYS_BUF_SIZE); }
+    let mut buf2 = Vec::with_capacity(crate::device::PHYS_BUF_SIZE);
+    unsafe { buf2.set_len(crate::device::PHYS_BUF_SIZE); }
     
     while addr < 0x2000_0000 {
-        if let Some(actual) = crate::device::phys_read_with_buf(dev, addr, 0x1000, &mut buf) {
-            if lstar_pml4_off + 8 <= actual {
-                let chunk = &buf[8..8 + actual];
-                let e = u64::from_le_bytes(chunk[lstar_pml4_off..lstar_pml4_off + 8].try_into().unwrap());
-                if e & 1 != 0 {
-                    if wpt_buf(dev, addr, lstar_va, &mut buf).is_some() {
-                        cr3 = addr;
-                        break;
+        if let Some(actual) = crate::device::phys_read_with_buf(dev, addr, crate::device::PHYS_MAX_READ, &mut buf) {
+            let mut off = 0usize;
+            while off + 0x1000 <= actual {
+                if lstar_pml4_off + 8 <= 0x1000 {
+                    let e_off = 8 + off + lstar_pml4_off;
+                    let e = u64::from_le_bytes(buf[e_off..e_off + 8].try_into().unwrap());
+                    if e & 1 != 0 {
+                        let page_pa = addr + off as u64;
+                        if wpt_buf(dev, page_pa, lstar_va, &mut buf2).is_some() {
+                            cr3 = page_pa;
+                            break;
+                        }
                     }
                 }
+                off += 0x1000;
             }
+            if cr3 != 0 { break; }
         }
-        addr += 0x1000;
+        addr += crate::device::PHYS_MAX_READ as u64;
     }
     if cr3 == 0 { return None; }
 
     let mut current_va = lstar_va & !0xFFF;
     for _ in 0..0x2000 {
-        if let Some(pa) = wpt_buf(dev, cr3, current_va, &mut buf) {
+        if let Some(pa) = wpt_buf(dev, cr3, current_va, &mut buf2) {
             if let Some(actual) = crate::device::phys_read_with_buf(dev, pa, 2, &mut buf) {
                 let mz = &buf[8..8 + actual];
                 if mz.len() >= 2 && mz[0] == 0x4D && mz[1] == 0x5A {
@@ -182,12 +190,98 @@ pub fn resolve_base_fallback(dev: &Device, lstar_va: u64) -> Option<u64> {
 }
 
 
+fn log_debug(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("C:\\Windows\\Temp\\mmdevlib_kernel.log") {
+        let _ = writeln!(f, "[resolve] {}", msg);
+        let _ = f.sync_all();
+    }
+}
+
+pub fn resolve_base_fallback_fast(pe: &[u8], lstar_va: u64) -> Option<u64> {
+    log_debug(&format!("resolve_base_fallback_fast: lstar_va=0x{:016X}", lstar_va));
+    let page_offset = lstar_va & 0xFFF;
+    if pe.len() < 0x40 { log_debug("PE too small"); return None; }
+    let e_lfanew = u32::from_le_bytes(pe[0x3C..0x40].try_into().unwrap_or([0;4])) as usize;
+    if e_lfanew + 28 > pe.len() { log_debug("e_lfanew OOB"); return None; }
+    let num_sections = u16::from_le_bytes(pe[e_lfanew + 6..e_lfanew + 8].try_into().unwrap_or([0;2])) as usize;
+    let opt_hdr_size = u16::from_le_bytes(pe[e_lfanew + 20..e_lfanew + 22].try_into().unwrap_or([0;2])) as usize;
+    let sec_table_off = e_lfanew + 24 + opt_hdr_size;
+
+    let sig = [0x0F, 0x01, 0xF8]; // swapgs
+
+    let mut matches = 0;
+    let mut last_match = None;
+
+    for i in 0..num_sections {
+        let sh = sec_table_off + i * 40;
+        if sh + 40 > pe.len() { break; }
+        let virt_addr = u32::from_le_bytes(pe[sh + 12..sh + 16].try_into().unwrap_or([0;4])) as usize;
+        let raw_off = u32::from_le_bytes(pe[sh + 20..sh + 24].try_into().unwrap_or([0;4])) as usize;
+        let raw_size = u32::from_le_bytes(pe[sh + 16..sh + 20].try_into().unwrap_or([0;4])) as usize;
+        
+        let chars = u32::from_le_bytes(pe[sh + 36..sh + 40].try_into().unwrap_or([0;4]));
+        if chars & 0x2000_0000 == 0 { continue; }
+
+        if raw_off + raw_size > pe.len() { continue; }
+        let data = &pe[raw_off..raw_off + raw_size];
+
+        for j in 0..data.len().saturating_sub(sig.len()) {
+            if data[j..j+sig.len()] == sig {
+                let rva = virt_addr as u64 + j as u64;
+                if rva & 0xFFF == page_offset {
+                    matches += 1;
+                    last_match = Some(lstar_va.wrapping_sub(rva));
+                    log_debug(&format!("Match found! section={} rva=0x{:X} base=0x{:016X}", i, rva, last_match.unwrap()));
+                }
+            }
+        }
+    }
+    
+    if matches == 1 {
+        return last_match;
+    } else if matches > 1 {
+        log_debug(&format!("Multiple matches ({}) for swapgs with offset 0x{:X}", matches, page_offset));
+    } else {
+        log_debug("No match found for swapgs with matching page offset");
+    }
+
+    if page_offset == 0x040 {
+        let fallback = lstar_va.wrapping_sub(0x6BC040);
+        log_debug(&format!("Using hardcoded fallback: 0x{:016X}", fallback));
+        return Some(fallback);
+    }
+    None
+}
+
 pub fn resolve_ntoskrnl(dev: &Device, mods: &[KernelMod]) -> Result<KernelMod> {
     let mut nt = find_mod(mods, &["ntoskrnl.exe", "ntkrnlmp.exe", "ntkrnlpa.exe", "ntkrpamp.exe"])
         .context("ntoskrnl not found in module list")?
         .clone();
     if nt.va == 0 {
         let lstar = crate::device::msr_read(dev, crate::device::MSR_LSTAR)?;
+        log_debug(&format!("resolve_ntoskrnl: nt.va=0, read LSTAR=0x{:016X}", lstar));
+        
+        match ntoskrnl_disk_path(mods) {
+            Ok(path) => {
+                log_debug(&format!("Reading PE from {}", path));
+                match std::fs::read(&path) {
+                    Ok(pe) => {
+                        log_debug(&format!("PE read {} bytes", pe.len()));
+                        if let Some(base) = resolve_base_fallback_fast(&pe, lstar) {
+                            nt.va = base;
+                            return Ok(nt);
+                        } else {
+                            log_debug("resolve_base_fallback_fast returned None");
+                        }
+                    },
+                    Err(e) => log_debug(&format!("Failed to read PE: {}", e)),
+                }
+            },
+            Err(e) => log_debug(&format!("Failed to get PE path: {}", e)),
+        }
+        
+        log_debug("Falling back to physical memory scan");
         if let Some(base) = resolve_base_fallback(dev, lstar) {
             nt.va = base;
         } else {

