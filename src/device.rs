@@ -13,7 +13,7 @@ use crate::utils::to_wide;
 
 pub const DEVICE_PATH: &str = "\\\\.\\DriversCloud_amd64";
 
-const PHYS_BUF_SIZE: usize = 0x1e8498;
+pub const PHYS_BUF_SIZE: usize = 0x1e8498;
 pub const PHYS_MAX_READ: u32 = 0x1e8480;
 
 const IOCTL_PHYS_READ: u32 = 0x80ff2010;
@@ -88,19 +88,31 @@ impl Drop for Device {
     }
 }
 
-pub fn phys_read(dev: &Device, pa: u64, count: u32) -> Option<Vec<u8>> {
+pub fn phys_read_with_buf(dev: &Device, pa: u64, count: u32, buf: &mut [u8]) -> Option<usize> {
     if pa > u32::MAX as u64 { return None; }
     let count = count.min(PHYS_MAX_READ);
-    let mut buf = vec![0u8; PHYS_BUF_SIZE];
+    if buf.len() < PHYS_BUF_SIZE { return None; }
     buf[0..4].copy_from_slice(&(pa as u32).to_le_bytes());
     buf[4..8].copy_from_slice(&count.to_le_bytes());
-    dev.ioctl(IOCTL_PHYS_READ, &mut buf).ok()?;
+    dev.ioctl(IOCTL_PHYS_READ, buf).ok()?;
     let actual = u32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize;
+    Some(actual)
+}
+
+pub fn phys_read(dev: &Device, pa: u64, count: u32) -> Option<Vec<u8>> {
+    let mut buf = Vec::with_capacity(PHYS_BUF_SIZE);
+    unsafe { buf.set_len(PHYS_BUF_SIZE); }
+    let actual = phys_read_with_buf(dev, pa, count, &mut buf)?;
     Some(buf[8..8 + actual].to_vec())
 }
 
 pub fn phys_read_result(dev: &Device, pa: u64, count: u32) -> Result<Vec<u8>> {
     phys_read(dev, pa, count).with_context(|| format!("phys_read PA=0x{:X}", pa))
+}
+
+pub fn rd_u64_with_buf(dev: &Device, pa: u64, buf: &mut [u8]) -> Option<u64> {
+    let actual = phys_read_with_buf(dev, pa, 8, buf)?;
+    buf.get(8..16).map(|s| u64::from_le_bytes(s.try_into().unwrap()))
 }
 
 pub fn rd_u64(dev: &Device, pa: u64) -> Option<u64> {

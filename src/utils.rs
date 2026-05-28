@@ -56,7 +56,7 @@ pub fn find_mod<'a>(mods: &'a [KernelMod], names: &[&str]) -> Option<&'a KernelM
     mods.iter().find(|m| names.iter().any(|n| m.name == *n))
 }
 
-fn walk_page_table(dev: &Device, cr3: u64, va: u64) -> Option<u64> {
+pub fn walk_page_table(dev: &Device, cr3: u64, va: u64) -> Option<u64> {
     let pml4e = rd_u64(dev, (cr3 & PT_MASK) + ((va >> 39) & 0x1FF) * 8)?;
     if pml4e & 1 == 0 { return None; }
 
@@ -76,6 +76,28 @@ fn walk_page_table(dev: &Device, cr3: u64, va: u64) -> Option<u64> {
     if pte & 1 == 0 { return None; }
     Some((pte & PT_MASK) + (va & 0xFFF))
 }
+
+pub fn wpt_buf(dev: &Device, cr3: u64, va: u64, buf: &mut [u8]) -> Option<u64> {
+    let pml4e = crate::device::rd_u64_with_buf(dev, (cr3 & PT_MASK) + ((va >> 39) & 0x1FF) * 8, buf)?;
+    if pml4e & 1 == 0 { return None; }
+
+    let pdpte = crate::device::rd_u64_with_buf(dev, (pml4e & PT_MASK) + ((va >> 30) & 0x1FF) * 8, buf)?;
+    if pdpte & 1 == 0 { return None; }
+    if pdpte & 0x80 != 0 {
+        return Some((pdpte & 0x000F_FFFF_FFC0_0000) + (va & 0x3FFF_FFFF));
+    }
+
+    let pde = crate::device::rd_u64_with_buf(dev, (pdpte & PT_MASK) + ((va >> 21) & 0x1FF) * 8, buf)?;
+    if pde & 1 == 0 { return None; }
+    if pde & 0x80 != 0 {
+        return Some((pde & 0x000F_FFFF_FFE0_0000) + (va & 0x1F_FFFF));
+    }
+
+    let pte = crate::device::rd_u64_with_buf(dev, (pde & PT_MASK) + ((va >> 12) & 0x1FF) * 8, buf)?;
+    if pte & 1 == 0 { return None; }
+    Some((pte & PT_MASK) + (va & 0xFFF))
+}
+
 
 pub fn find_cr3_for_va(dev: &Device, nt_va: u64, nt_size: u32, lstar_va: u64) -> Option<(u64, u64)> {
     let pml4_idx = (nt_va >> 39) & 0x1FF;
@@ -117,6 +139,62 @@ pub fn find_cr3_for_va(dev: &Device, nt_va: u64, nt_size: u32, lstar_va: u64) ->
         addr += PHYS_MAX_READ as u64;
     }
     None
+}
+
+pub fn resolve_base_fallback(dev: &Device, lstar_va: u64) -> Option<u64> {
+    let mut cr3 = 0;
+    let lstar_pml4_idx = (lstar_va >> 39) & 0x1FF;
+    let lstar_pml4_off = (lstar_pml4_idx * 8) as usize;
+    let mut addr = 0x1000u64;
+    let mut buf = Vec::with_capacity(crate::device::PHYS_BUF_SIZE);
+    unsafe { buf.set_len(crate::device::PHYS_BUF_SIZE); }
+    
+    while addr < 0x2000_0000 {
+        if let Some(actual) = crate::device::phys_read_with_buf(dev, addr, 0x1000, &mut buf) {
+            if lstar_pml4_off + 8 <= actual {
+                let chunk = &buf[8..8 + actual];
+                let e = u64::from_le_bytes(chunk[lstar_pml4_off..lstar_pml4_off + 8].try_into().unwrap());
+                if e & 1 != 0 {
+                    if wpt_buf(dev, addr, lstar_va, &mut buf).is_some() {
+                        cr3 = addr;
+                        break;
+                    }
+                }
+            }
+        }
+        addr += 0x1000;
+    }
+    if cr3 == 0 { return None; }
+
+    let mut current_va = lstar_va & !0xFFF;
+    for _ in 0..0x2000 {
+        if let Some(pa) = wpt_buf(dev, cr3, current_va, &mut buf) {
+            if let Some(actual) = crate::device::phys_read_with_buf(dev, pa, 2, &mut buf) {
+                let mz = &buf[8..8 + actual];
+                if mz.len() >= 2 && mz[0] == 0x4D && mz[1] == 0x5A {
+                    return Some(current_va);
+                }
+            }
+        }
+        current_va -= 0x1000;
+    }
+    None
+}
+
+
+pub fn resolve_ntoskrnl(dev: &Device, mods: &[KernelMod]) -> Result<KernelMod> {
+    let mut nt = find_mod(mods, &["ntoskrnl.exe", "ntkrnlmp.exe", "ntkrnlpa.exe", "ntkrpamp.exe"])
+        .context("ntoskrnl not found in module list")?
+        .clone();
+    if nt.va == 0 {
+        let lstar = crate::device::msr_read(dev, crate::device::MSR_LSTAR)?;
+        if let Some(base) = resolve_base_fallback(dev, lstar) {
+            nt.va = base;
+        } else {
+            bail!("Initialization failed (err 2)");
+        }
+    }
+    Ok(nt)
 }
 
 pub fn ntoskrnl_disk_path(mods: &[KernelMod]) -> Result<String> {

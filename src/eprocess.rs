@@ -23,8 +23,7 @@ pub fn read_image_filename(krw: &KernelRW, eproc: u64) -> Result<String> {
 
 pub fn resolve_system_eprocess(dev: &Device) -> Result<(KernelRW<'_>, u64)> {
     let mods = get_kernel_modules()?;
-    let nt = find_mod(&mods, &["ntoskrnl.exe", "ntkrnlmp.exe", "ntkrnlpa.exe", "ntkrpamp.exe"])
-        .context("ntoskrnl not found")?;
+    let nt = crate::utils::resolve_ntoskrnl(dev, &mods)?;
     let path = ntoskrnl_disk_path(&mods)?;
     let pe = std::fs::read(&path).with_context(|| format!("cannot read {}", path))?;
     let ps_va = find_export_va(&pe, nt.va, "PsInitialSystemProcess")?;

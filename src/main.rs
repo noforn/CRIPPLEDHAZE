@@ -161,7 +161,7 @@ fn main() -> Result<()> {
         }
 
         Cmd::LookupExport { symbol } => {
-            cmd_lookup_export(&symbol)?;
+            cmd_lookup_export(&dev, &symbol)?;
         }
 
         Cmd::SysEntry => {

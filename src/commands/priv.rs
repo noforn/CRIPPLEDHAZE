@@ -10,8 +10,7 @@ use crate::utils::{find_export_va, find_mod, get_kernel_modules, ntoskrnl_disk_p
 
 pub fn cmd_priv(dev: &Device, target_pid: u64) -> Result<()> {
     let mods = get_kernel_modules()?;
-    let nt = find_mod(&mods, &["ntoskrnl.exe", "ntkrnlmp.exe", "ntkrnlpa.exe", "ntkrpamp.exe"])
-        .context("ntoskrnl not found")?;
+    let nt = crate::utils::resolve_ntoskrnl(dev, &mods)?;
     let path = ntoskrnl_disk_path(&mods)?;
     let pe = std::fs::read(&path).with_context(|| format!("cannot read {}", path))?;
 
@@ -71,8 +70,7 @@ pub fn cmd_priv(dev: &Device, target_pid: u64) -> Result<()> {
 
 pub fn cmd_privn(dev: &Device, target_name: &str) -> Result<()> {
     let mods = get_kernel_modules()?;
-    let nt = find_mod(&mods, &["ntoskrnl.exe", "ntkrnlmp.exe", "ntkrnlpa.exe", "ntkrpamp.exe"])
-        .context("ntoskrnl not found")?;
+    let nt = crate::utils::resolve_ntoskrnl(dev, &mods)?;
     let path = ntoskrnl_disk_path(&mods)?;
     let pe = std::fs::read(&path).with_context(|| format!("cannot read {}", path))?;
 

@@ -46,10 +46,9 @@ pub fn cmd_scan_gadgets(mods: &[KernelMod], runtime_base: u64) -> Result<Gadgets
     Ok(gadgets)
 }
 
-pub fn cmd_lookup_export(symbol: &str) -> Result<()> {
+pub fn cmd_lookup_export(dev: &Device, symbol: &str) -> Result<()> {
     let mods = get_kernel_modules()?;
-    let nt = find_mod(&mods, &["ntoskrnl.exe", "ntkrnlmp.exe", "ntkrnlpa.exe", "ntkrpamp.exe"])
-        .context("ntoskrnl not found")?;
+    let nt = crate::utils::resolve_ntoskrnl(dev, &mods)?;
     let path = ntoskrnl_disk_path(&mods)?;
     let pe = std::fs::read(&path).with_context(|| format!("cannot read {}", path))?;
     let va = find_export_va(&pe, nt.va, symbol)?;
@@ -59,8 +58,7 @@ pub fn cmd_lookup_export(symbol: &str) -> Result<()> {
 
 pub fn cmd_eprocess(dev: &Device) -> Result<()> {
     let mods = get_kernel_modules()?;
-    let nt = find_mod(&mods, &["ntoskrnl.exe", "ntkrnlmp.exe", "ntkrnlpa.exe", "ntkrpamp.exe"])
-        .context("ntoskrnl not found")?;
+    let nt = crate::utils::resolve_ntoskrnl(dev, &mods)?;
     let path = ntoskrnl_disk_path(&mods)?;
     let pe = std::fs::read(&path).with_context(|| format!("cannot read {}", path))?;
     let ps_va = find_export_va(&pe, nt.va, "PsInitialSystemProcess")?;
@@ -99,8 +97,7 @@ pub fn cmd_token(dev: &Device) -> Result<()> {
 
 pub fn cmd_find_kbase(dev: &Device) -> Result<()> {
     let mods = get_kernel_modules()?;
-    let nt = find_mod(&mods, &["ntoskrnl.exe", "ntkrnlmp.exe", "ntkrnlpa.exe", "ntkrpamp.exe"])
-        .context("ntoskrnl not found in module list")?;
+    let nt = crate::utils::resolve_ntoskrnl(dev, &mods)?;
     println!("[+] ntoskrnl VA=0x{:016X}", nt.va);
     println!("  [i] size=0x{:X}", nt.size);
 

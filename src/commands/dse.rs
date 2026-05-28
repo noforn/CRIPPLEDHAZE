@@ -309,9 +309,7 @@ fn kread_dword_disk(pe: &[u8], rva: u32) -> Option<u32> {
 
 pub fn cmd_dse(dev: &Device, action: &str, set_value: Option<u32>) -> Result<()> {
     let mods = get_kernel_modules()?;
-
-    let nt = find_mod(&mods, &["ntoskrnl.exe", "ntkrnlmp.exe", "ntkrnlpa.exe", "ntkrpamp.exe"])
-        .context("ntoskrnl not found")?;
+    let nt = crate::utils::resolve_ntoskrnl(dev, &mods)?;
     let ci = find_mod(&mods, &["ci.dll"])
         .context("ci.dll not found in loaded module list")?;
 

