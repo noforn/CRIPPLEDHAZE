@@ -5,8 +5,8 @@
 
 [CmdletBinding()]
 param(
-    [string]$OutFile    = 'C:\temp\Agenda.img',
-    [string]$VolumeName = 'AGENDA'
+    [string]$OutFile    = 'C:\temp\DocShare.img',
+    [string]$VolumeName = 'DocShare'
 )
 
 $ErrorActionPreference = 'Stop'
