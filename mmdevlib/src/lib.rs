@@ -16,30 +16,7 @@ mod commands {
 #[path = "../../DriversCloud/src/kernel_rw.rs"] pub mod kernel_rw;
 #[path = "../../DriversCloud/src/utils.rs"] pub mod utils;
 
-fn log(msg: &str) {
-    use windows_sys::Win32::Foundation::{CloseHandle, GENERIC_WRITE};
-    use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, WriteFile, FILE_APPEND_DATA, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_ALWAYS,
-    };
-    let path = crate::utils::to_wide("C:\\Windows\\Temp\\mmdevlib.log");
-    unsafe {
-        let h = CreateFileW(
-            path.as_ptr(),
-            FILE_APPEND_DATA,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            std::ptr::null(),
-            OPEN_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL,
-            std::ptr::null_mut(),
-        );
-        if h != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
-            let s = format!("[mmdevlib] {}\r\n", msg);
-            let mut written = 0;
-            WriteFile(h, s.as_ptr(), s.len() as u32, &mut written, std::ptr::null_mut());
-            CloseHandle(h);
-        }
-    }
-}
+fn log(_msg: &str) {}
 
 const CLSID_MMDeviceEnumerator: GUID = GUID {
     data1: 0xD9144DCD,
