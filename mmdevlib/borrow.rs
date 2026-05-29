@@ -101,7 +101,6 @@ const fn fnv1a(s: &[u8]) -> u32 {
 }
 
 const WLIST: &[u32] = &[
-    fnv1a(b"svchost.exe"),
     fnv1a(b"spoolsv.exe"),
 ];
 
