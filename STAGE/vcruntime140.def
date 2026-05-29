@@ -1,0 +1,22 @@
+LIBRARY vcruntime140
+EXPORTS
+    __C_specific_handler
+    __current_exception
+    __current_exception_context
+    __CxxFrameHandler3
+    __std_exception_copy
+    __std_exception_destroy
+    _CxxThrowException
+    memcpy
+    memmove
+    memset
+    __uncaught_exceptions
+    __uncaught_exception
+    memchr
+    memcmp
+    __std_terminate
+    _purecall
+    __AdjustPointer
+    __std_type_info_destroy_list
+    __processing_throw
+    _set_se_translator
