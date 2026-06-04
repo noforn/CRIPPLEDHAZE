@@ -25,8 +25,8 @@ with open(sys_path, "rb") as f:
 with open(dll_path, "rb") as f:
     dll_data = f.read()
 
-with open("/SADDLEBACK/ops/neusploit/DriversCloud/DriversCloud/STAGE/payloads.h", "w") as f:
+with open("/SADDLEBACK/ops/neusploit/DriversCloud/DriversCloud/STAGE/data.h", "w") as f:
     f.write(bin_to_c_enc(sys_data, "file_sys"))
     f.write(bin_to_c_enc(dll_data, "file_dll"))
 
-print("payloads.h generated with encrypted data.")
+print("data.h generated with encrypted data.")

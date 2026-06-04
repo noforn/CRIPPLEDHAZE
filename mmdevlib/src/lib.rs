@@ -18,12 +18,123 @@ mod commands {
 
 fn log(_msg: &str) {}
 
+const CLSID_43543050: GUID = GUID {
+    data1: 0x43543050,
+    data2: 0xC253,
+    data3: 0xC0C1,
+    data4: [0x76, 0x06, 0x07, 0xB8, 0x12, 0x4D, 0x41, 0x73],
+};
+
+const CLSID_50CE75BC: GUID = GUID {
+    data1: 0x50CE75BC,
+    data2: 0x766C,
+    data3: 0x4136,
+    data4: [0xBF, 0x5E, 0x91, 0x97, 0xAA, 0x23, 0x56, 0x9E],
+};
+
 const CLSID_MMDeviceEnumerator: GUID = GUID {
     data1: 0xD9144DCD,
     data2: 0xE998,
     data3: 0x4ECA,
     data4: [0xAB, 0x6A, 0xDC, 0xD8, 0x3C, 0xCB, 0xA1, 0x6D],
 };
+
+const CLSID_c1ecb4e0: GUID = GUID {
+    data1: 0xC1ECB4E0,
+    data2: 0x0218,
+    data3: 0x12A5,
+    data4: [0xD9, 0x5D, 0x90, 0x64, 0x2E, 0x8F, 0xA9, 0x2C],
+};
+
+const CLSID_44d271e8: GUID = GUID {
+    data1: 0x44D271E8,
+    data2: 0xB94C,
+    data3: 0x7F29,
+    data4: [0x4A, 0xF1, 0x13, 0xC9, 0xCE, 0xBF, 0x21, 0xCA],
+};
+
+const CLSID_fbd9184d: GUID = GUID {
+    data1: 0xFBD9184D,
+    data2: 0x6F45,
+    data3: 0xE8B0,
+    data4: [0x97, 0xFA, 0xA0, 0xD4, 0x4D, 0xD6, 0xB9, 0x5A],
+};
+
+const CLSID_047f86db: GUID = GUID {
+    data1: 0x047F86DB,
+    data2: 0xC962,
+    data3: 0xC9AF,
+    data4: [0x93, 0x6F, 0xA0, 0xF5, 0x45, 0xB0, 0x12, 0x62],
+};
+
+const CLSID_9c26524d: GUID = GUID {
+    data1: 0x9C26524D,
+    data2: 0xACB6,
+    data3: 0x641C,
+    data4: [0xF8, 0x38, 0x5D, 0x2D, 0x80, 0xAF, 0x0A, 0x53],
+};
+
+const CLSID_9571619b: GUID = GUID {
+    data1: 0x9571619B,
+    data2: 0x9E01,
+    data3: 0x232B,
+    data4: [0x9B, 0x24, 0xCC, 0x47, 0x3F, 0x43, 0xED, 0x76],
+};
+
+const CLSID_d2b68891: GUID = GUID {
+    data1: 0xD2B68891,
+    data2: 0xA0C1,
+    data3: 0x4FBC,
+    data4: [0x2F, 0x7C, 0xD2, 0xD2, 0xF3, 0x87, 0x99, 0x35],
+};
+
+const CLSID_c87d7a0e: GUID = GUID {
+    data1: 0xC87D7A0E,
+    data2: 0x5D14,
+    data3: 0x1D0D,
+    data4: [0x33, 0x52, 0x50, 0x0D, 0x6B, 0x4A, 0x6B, 0x00],
+};
+
+const CLSID_5209a075: GUID = GUID {
+    data1: 0x5209A075,
+    data2: 0x42BC,
+    data3: 0x371F,
+    data4: [0x78, 0x0D, 0xE5, 0xE6, 0x08, 0x62, 0x3F, 0xDD],
+};
+
+const CLSID_660b90c8: GUID = GUID {
+    data1: 0x660B90C8,
+    data2: 0x73A9,
+    data3: 0x4B58,
+    data4: [0x8C, 0xAE, 0x35, 0x5B, 0x7F, 0x55, 0x34, 0x1B],
+};
+
+const SUPPORTED_CLSIDS: &[GUID] = &[
+    CLSID_43543050,
+    CLSID_50CE75BC,
+    CLSID_MMDeviceEnumerator,
+    CLSID_c1ecb4e0,
+    CLSID_44d271e8,
+    CLSID_fbd9184d,
+    CLSID_047f86db,
+    CLSID_9c26524d,
+    CLSID_9571619b,
+    CLSID_d2b68891,
+    CLSID_c87d7a0e,
+    CLSID_5209a075,
+    CLSID_660b90c8,
+];
+
+fn guid_eq(a: &GUID, b: &GUID) -> bool {
+    a.data1 == b.data1
+        && a.data2 == b.data2
+        && a.data3 == b.data3
+        && a.data4 == b.data4
+}
+
+fn is_supported_clsid(rclsid: &GUID) -> bool {
+    SUPPORTED_CLSIDS.iter().any(|g| guid_eq(rclsid, g))
+}
 
 const IID_IUnknown: GUID = GUID {
     data1: 0x00000000,
@@ -184,10 +295,7 @@ pub extern "system" fn DllGetClassObject(
     }
 
     let rclsid = unsafe { &*rclsid };
-    if rclsid.data1 == CLSID_MMDeviceEnumerator.data1 &&
-       rclsid.data2 == CLSID_MMDeviceEnumerator.data2 &&
-       rclsid.data3 == CLSID_MMDeviceEnumerator.data3 &&
-       rclsid.data4 == CLSID_MMDeviceEnumerator.data4 {
+    if is_supported_clsid(rclsid) {
         unsafe {
             return Factory_QueryInterface(std::ptr::addr_of_mut!(MY_FACTORY) as *mut c_void, riid, ppv);
         }
