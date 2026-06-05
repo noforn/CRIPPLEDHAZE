@@ -229,7 +229,9 @@ def print_reg_paste(clsid: str, suffix: str) -> None:
 
 def print_api_blob(api_name: str) -> None:
     enc = xor_encode(api_name)
-    var = "e_" + api_name
+    var = "e_" + api_name.replace(".", "_")
+    ra_len = len(api_name)
+    print(f"; ra(..., {ra_len})")
     print(format_c_array_oneline(enc, var))
     print()
 

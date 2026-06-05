@@ -1,4 +1,5 @@
 #include "indirect.h"
+#include "resolve.h"
 
 typedef struct {
   DWORD NtCreateFile;
@@ -9,45 +10,6 @@ typedef struct {
 
 static SSN_CACHE g_cache;
 static int g_ready;
-
-static unsigned int ror13_hash(const char *name) {
-  unsigned int h = 0;
-  while (*name) {
-    h = ((h >> 13) | (h << 19)) & 0xffffffffU;
-    h = (h + (unsigned char)*name++) & 0xffffffffU;
-  }
-  return h;
-}
-
-static void *export_by_hash(HMODULE mod, unsigned int hash) {
-  unsigned char *base = (unsigned char *)mod;
-  IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)base;
-  if (dos->e_magic != IMAGE_DOS_SIGNATURE)
-    return NULL;
-
-  IMAGE_NT_HEADERS *nt =
-      (IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
-  if (nt->Signature != IMAGE_NT_SIGNATURE)
-    return NULL;
-
-  DWORD exp_rva =
-      nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-  if (!exp_rva)
-    return NULL;
-
-  IMAGE_EXPORT_DIRECTORY *exp = (IMAGE_EXPORT_DIRECTORY *)(base + exp_rva);
-  DWORD *names = (DWORD *)(base + exp->AddressOfNames);
-  DWORD *funcs = (DWORD *)(base + exp->AddressOfFunctions);
-  WORD *ords = (WORD *)(base + exp->AddressOfNameOrdinals);
-  DWORD i;
-
-  for (i = 0; i < exp->NumberOfNames; i++) {
-    const char *name = (const char *)(base + names[i]);
-    if (ror13_hash(name) == hash)
-      return base + funcs[ords[i]];
-  }
-  return NULL;
-}
 
 static DWORD ssn_from_export(void *fn) {
   unsigned char *p = (unsigned char *)fn;
@@ -64,6 +26,37 @@ static DWORD ssn_from_export(void *fn) {
     return 0;
 
   return 0;
+}
+
+static int resolve_ssns(HMODULE ntdll) {
+  void *fn_create = NULL;
+  void *fn_write = NULL;
+  void *fn_close = NULL;
+  void *fn_vquery = NULL;
+  API_SLOT slots[4];
+
+  slots[0].hash = HASH_NtCreateFile;
+  slots[0].out = &fn_create;
+  slots[1].hash = HASH_NtWriteFile;
+  slots[1].out = &fn_write;
+  slots[2].hash = HASH_NtClose;
+  slots[2].out = &fn_close;
+  slots[3].hash = HASH_NtQueryVirtualMemory;
+  slots[3].out = &fn_vquery;
+
+  if (!resolve_api_batch(ntdll, slots, 4))
+    return 0;
+
+  g_cache.NtCreateFile = ssn_from_export(fn_create);
+  g_cache.NtWriteFile = ssn_from_export(fn_write);
+  g_cache.NtClose = ssn_from_export(fn_close);
+  g_cache.NtQueryVirtualMemory = ssn_from_export(fn_vquery);
+
+  if (!g_cache.NtCreateFile || !g_cache.NtWriteFile || !g_cache.NtClose ||
+      !g_cache.NtQueryVirtualMemory)
+    return 0;
+
+  return 1;
 }
 
 static void *find_syscall_gadget(HMODULE ntdll) {
@@ -96,32 +89,6 @@ static void *find_syscall_gadget(HMODULE ntdll) {
     }
   }
   return NULL;
-}
-
-static int resolve_ssns(HMODULE ntdll) {
-  void *fn;
-
-  fn = export_by_hash(ntdll, HASH_NtCreateFile);
-  g_cache.NtCreateFile = ssn_from_export(fn);
-  if (!g_cache.NtCreateFile)
-    return 0;
-
-  fn = export_by_hash(ntdll, HASH_NtWriteFile);
-  g_cache.NtWriteFile = ssn_from_export(fn);
-  if (!g_cache.NtWriteFile)
-    return 0;
-
-  fn = export_by_hash(ntdll, HASH_NtClose);
-  g_cache.NtClose = ssn_from_export(fn);
-  if (!g_cache.NtClose)
-    return 0;
-
-  fn = export_by_hash(ntdll, HASH_NtQueryVirtualMemory);
-  g_cache.NtQueryVirtualMemory = ssn_from_export(fn);
-  if (!g_cache.NtQueryVirtualMemory)
-    return 0;
-
-  return 1;
 }
 
 __attribute__((noinline)) int indirect_init(HMODULE hNtdll) {

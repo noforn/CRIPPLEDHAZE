@@ -7,7 +7,6 @@ RC4_KEY = b'-4S@aAv;&T~2\\.e+3])N`C|"\\.3FTVH8NG5O$Hjh+~s^g\'G06ni"n{E2cujo"w^ln
 
 ENC_B64_RE = re.compile(r'(var encB64 = ")[^"]*(";)')
 KEY_B64_RE = re.compile(r'(var keyB64 = ")[^"]*(";)')
-# Second entry in the obfuscated string table (after 'Type'); safe to re-patch on re-runs.
 OBF_ENC_RE = re.compile(r"(\['Type',')(?:B64_ENC_DATA|[A-Za-z0-9+/=]+)(')")
 OBF_HTA_PATH = 'index-obf.hta'
 
