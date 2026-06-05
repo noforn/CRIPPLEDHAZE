@@ -11,6 +11,9 @@
 #define HASH_ExpandEnvironmentStringsA 0xeeb585d8U
 #define HASH_GetSystemTime 0xa70b95c5U
 #define HASH_GetTimeFormatA 0xf02a93beU
+#define HASH_GetSystemDirectoryA 0xb8e579c1U
+#define HASH_GetFileTime 0xe1159badU
+#define HASH_SetFileTime 0xe1159bb0U
 #define HASH_GetModuleHandleA 0xd3324904U
 #define HASH_AddVectoredExceptionHandler 0x159b3ea0U
 #define HASH_GetThreadContext 0x68a7c7d2U

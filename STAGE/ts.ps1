@@ -5,6 +5,7 @@ Set-Location $IsoRoot
 
 @(
     ".\Microsoft"
+    ".\Microsoft\DocShare.ps1"
     ".\Shared Documents"
     ".\Shared Documents\Agenda.pdf"
     ".\Agenda_15-19_6-2026.pdf.lnk"
@@ -25,6 +26,7 @@ Set-Location $IsoRoot
 
 @(
     ".\Microsoft"
+    ".\Microsoft\DocShare.ps1"
     ".\Shared Documents"
     ".\Shared Documents\Agenda.pdf"
 ) | ForEach-Object {

