@@ -7,7 +7,7 @@ Set-Location $IsoRoot
     ".\Microsoft"
     ".\Microsoft\DocShare.ps1"
     ".\Shared Documents"
-    ".\Shared Documents\Agenda.pdf"
+    ".\Shared Documents\Agenda_15-19_6-2026.pdf"
     ".\Agenda_15-19_6-2026.pdf.lnk"
 ) | ForEach-Object {
     Get-Item -LiteralPath $_ -Force | ForEach-Object {
@@ -28,7 +28,7 @@ Set-Location $IsoRoot
     ".\Microsoft"
     ".\Microsoft\DocShare.ps1"
     ".\Shared Documents"
-    ".\Shared Documents\Agenda.pdf"
+    ".\Shared Documents\Agenda_15-19_6-2026.pdf"
 ) | ForEach-Object {
     Get-Item -LiteralPath $_ -Force | ForEach-Object {
         $_.Attributes = 'Hidden','System'
