@@ -9,6 +9,7 @@ mod device;
 mod eprocess;
 mod gadgets;
 mod kernel_rw;
+mod obf;
 mod utils;
 
 use anyhow::{Context, Result};
@@ -16,13 +17,13 @@ use clap::{Parser, Subcommand};
 
 use crate::commands::kread::{cmd_kdump, cmd_kread, cmd_kwrite};
 use crate::commands::misc::{
-    cmd_eprocess, cmd_find_kbase, cmd_lookup_export, cmd_procid, cmd_proclinks, cmd_scan_gadgets,
-    cmd_token,
+    cmd_discover_offsets, cmd_eprocess, cmd_find_kbase, cmd_lookup_export, cmd_procid, cmd_proclinks,
+    cmd_scan_gadgets, cmd_token,
 };
 use crate::commands::borrow::cmd_inject;
 use crate::commands::dse::cmd_dse;
 use crate::commands::r#priv::{cmd_priv, cmd_privn};
-use crate::device::{msr_read, msr_write, phys_read_result, Device, DEVICE_PATH, MSR_LSTAR};
+use crate::device::{msr_read, msr_write, phys_read_result, Device, MSR_LSTAR};
 use crate::utils::{find_mod, get_kernel_modules, hexdump, parse_hex_or_dec};
 
 #[derive(Parser)]
@@ -112,13 +113,16 @@ enum Cmd {
         action: Option<String>,
         value: Option<String>,
     },
+
+    #[command(name = "discover")]
+    Discover,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let dev = Device::open(DEVICE_PATH)
-        .context("failed to open DriversCloud device")?;
+    let dev = Device::open_enc()
+        .context("failed to open driver device")?;
 
     match cli.cmd.unwrap_or(Cmd::Inject { pid: None }) {
         Cmd::RMem { addr, len, raw } => {
@@ -223,6 +227,10 @@ fn main() -> Result<()> {
                 None    => None,
             };
             cmd_dse(&dev, act, set_val)?;
+        }
+
+        Cmd::Discover => {
+            cmd_discover_offsets(&dev)?;
         }
     }
 

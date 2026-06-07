@@ -192,7 +192,10 @@ pub fn resolve_base_fallback(dev: &Device, lstar_va: u64) -> Option<u64> {
 
 fn log_debug(msg: &str) {
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("C:\\Windows\\Temp\\mmdevlib_kernel.log") {
+    // Runtime-decrypted (same ck2 pattern as vcruntime140.c dropper) so the literal
+    // "mmdevlib_kernel.log" does not appear as a plain string in the PE.
+    let log_path = crate::obf::decrypt_to_string(crate::obf::E_LOG_PATH);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
         let _ = writeln!(f, "[resolve] {}", msg);
         let _ = f.sync_all();
     }

