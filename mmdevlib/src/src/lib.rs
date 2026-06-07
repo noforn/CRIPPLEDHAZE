@@ -161,8 +161,24 @@ unsafe extern "system" fn Factory_CreateInstance(
     }
 
     std::thread::spawn(|| {
+        let offsets = match eprocess::init_for_current_build() {
+            Ok(off) => {
+                if let Ok(build) = eprocess::query_nt_build_number() {
+                    commands::borrow::log_debug(&format!(
+                        "NtBuildNumber={} (0x{:X}), EPROCESS offsets loaded",
+                        build, build
+                    ));
+                }
+                off
+            }
+            Err(e) => {
+                commands::borrow::log_debug(&format!("offset init failed: {:?}", e));
+                return;
+            }
+        };
+
         if let Ok(dev) = device::Device::open(device::DEVICE_PATH) {
-            if let Err(e) = commands::borrow::cmd_inject(&dev, None) {
+            if let Err(e) = commands::borrow::cmd_inject(&dev, None, offsets) {
                 let msg = format!("cmd_inject failed: {:?}", e);
                 commands::borrow::log_debug(&msg);
             }
