@@ -12,6 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $SourcePath = (Get-Location).ProviderPath
+Write-Host "[*] Packing ISO from: $SourcePath"
 $OutDir = Split-Path -Parent $OutFile
 if ($OutDir -and -not (Test-Path -LiteralPath $OutDir)) {
     New-Item -ItemType Directory -Path $OutDir -Force | Out-Null

