@@ -25,7 +25,7 @@ cmd_jealousmonkey.setPreHook(function (id, cmdline, parsed_json, ...parsed_lines
 
     let bof_params = ax.bof_pack("wstr", [payload]);
     let bof_path = ax.script_dir() + "_bin/jealousmonkey." + ax.arch(id) + ".o";
-    ax.execute_alias(id, cmdline, `execute bof "${bof_path}" ${bof_params}`, "JealousMonkey UAC bypass");
+    ax.execute_alias(id, cmdline, `execute bof "${bof_path}" ${bof_params}`, "JEALOUSMONKEY UAC bypass");
 });
 
 var group_jealousmonkey = ax.create_commands_group("JealousMonkey", [cmd_jealousmonkey]);

