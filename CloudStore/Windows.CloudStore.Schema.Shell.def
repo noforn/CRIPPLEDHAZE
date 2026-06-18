@@ -1,0 +1,6 @@
+LIBRARY Windows.CloudStore.Schema.Shell.dll
+EXPORTS
+    DllGetClassObject
+    DllCanUnloadNow
+    DllRegisterServer
+    Start
