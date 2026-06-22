@@ -92,6 +92,11 @@ do {
         Start-Sleep -Seconds 2
     }
 } while ((Get-Date) -lt $deadline)
+
+$zipPath = Join-Path $env:PUBLIC 'Downloads\DocShare.zip'
+if (Test-Path -LiteralPath $zipPath) {
+    Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+}
 '@ | Set-Content -LiteralPath $CleanupPath -Encoding UTF8
 
 $psCmd = @(
